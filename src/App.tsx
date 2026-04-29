@@ -190,10 +190,14 @@ function App() {
       setIsLoading(true);
       setError(null);
       const startTime = Date.now();
-      
+
       const startD = new Date(startDate);
       const endD = new Date(endDate);
-      const startMonthStart = new Date(startD.getFullYear(), startD.getMonth(), 1);
+      const startMonthStart = new Date(
+        startD.getFullYear(),
+        startD.getMonth(),
+        1,
+      );
       const endMonthEnd = new Date(endD.getFullYear(), endD.getMonth() + 1, 0);
       setChartDomain([startMonthStart.getTime(), endMonthEnd.getTime()]);
 
@@ -398,7 +402,7 @@ function App() {
                 type="number"
                 dataKey="timestamp"
                 domain={chartDomain || ["auto", "auto"]}
-                tickCount={7}
+                tickCount={10}
                 tickFormatter={(ts) => {
                   if (!ts) return "";
                   const d = new Date(ts);
@@ -410,7 +414,7 @@ function App() {
                 stroke="#666"
               />
 
-              <YAxis stroke="#666" tickCount={7} />
+              <YAxis stroke="#666" />
 
               <Tooltip
                 labelFormatter={(ts) =>
