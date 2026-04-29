@@ -58,6 +58,7 @@ function App() {
   } = useStore();
 
   const [calcTime, setCalcTime] = useState(0);
+  const [chartDomain, setChartDomain] = useState<[number, number] | null>(null);
 
   useEffect(() => {
     loadInitialData();
@@ -70,11 +71,11 @@ function App() {
       const range = await getDateRange();
       setDateRange(range);
       if (range.start) {
-        const [d, m, y] = range.start.split('.');
+        const [d, m, y] = range.start.split(".");
         setStartDate(`${y}-${m}-${d}`);
       }
       if (range.end) {
-        const [d, m, y] = range.end.split('.');
+        const [d, m, y] = range.end.split(".");
         setEndDate(`${y}-${m}-${d}`);
       }
     } catch (e) {
@@ -148,11 +149,11 @@ function App() {
           const range = await getDateRange();
           setDateRange(range);
           if (range.start) {
-            const [d, m, y] = range.start.split('.');
+            const [d, m, y] = range.start.split(".");
             setStartDate(`${y}-${m}-${d}`);
           }
           if (range.end) {
-            const [d, m, y] = range.end.split('.');
+            const [d, m, y] = range.end.split(".");
             setEndDate(`${y}-${m}-${d}`);
           }
 
@@ -189,6 +190,12 @@ function App() {
       setIsLoading(true);
       setError(null);
       const startTime = Date.now();
+      
+      const startD = new Date(startDate);
+      const endD = new Date(endDate);
+      const startMonthStart = new Date(startD.getFullYear(), startD.getMonth(), 1);
+      const endMonthEnd = new Date(endD.getFullYear(), endD.getMonth() + 1, 0);
+      setChartDomain([startMonthStart.getTime(), endMonthEnd.getTime()]);
 
       const result = await aggregate(startDate, endDate, frequency);
       setAggregateData(result.data);
@@ -256,8 +263,8 @@ function App() {
           )}
 
           <div className="files-list">
-            <button 
-              className="btn-link" 
+            <button
+              className="btn-link"
               onClick={() => setShowFilesModal(true)}
             >
               Файлы ({importFiles.length})
@@ -275,17 +282,19 @@ function App() {
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
               />
-              <button 
-                type="button" 
-                className="date-btn" 
+              <button
+                type="button"
+                className="date-btn"
                 onClick={() => {
                   if (dateRange.start) {
-                    const [d, m, y] = dateRange.start.split('.');
+                    const [d, m, y] = dateRange.start.split(".");
                     setStartDate(`${y}-${m}-${d}`);
                   }
                 }}
                 title="Минимум из данных"
-              >↓</button>
+              >
+                ↓
+              </button>
             </div>
             <span>–</span>
             <div className="date-input-group">
@@ -295,17 +304,19 @@ function App() {
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
               />
-              <button 
-                type="button" 
-                className="date-btn" 
+              <button
+                type="button"
+                className="date-btn"
                 onClick={() => {
                   if (dateRange.end) {
-                    const [d, m, y] = dateRange.end.split('.');
+                    const [d, m, y] = dateRange.end.split(".");
                     setEndDate(`${y}-${m}-${d}`);
                   }
                 }}
                 title="Максимум из данных"
-              >↑</button>
+              >
+                ↑
+              </button>
             </div>
           </div>
         </div>
@@ -377,8 +388,8 @@ function App() {
             >
               <defs>
                 <linearGradient id="stdGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#006994" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#006994" stopOpacity={0} />
+                  <stop offset="3%" stopColor="#006994" stopOpacity={0.3} />
+                  <stop offset="97%" stopColor="#006994" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#ccc" />
@@ -386,7 +397,8 @@ function App() {
               <XAxis
                 type="number"
                 dataKey="timestamp"
-                domain={["auto", "auto"]}
+                domain={chartDomain || ["auto", "auto"]}
+                tickCount={7}
                 tickFormatter={(ts) => {
                   if (!ts) return "";
                   const d = new Date(ts);
@@ -398,12 +410,14 @@ function App() {
                 stroke="#666"
               />
 
-              <YAxis stroke="#666" />
+              <YAxis stroke="#666" tickCount={7} />
 
               <Tooltip
-                labelFormatter={(ts) => ts ? new Date(ts).toLocaleDateString("ru-RU") : "Нет данных"}
+                labelFormatter={(ts) =>
+                  ts ? new Date(ts).toLocaleDateString("ru-RU") : "Нет данных"
+                }
                 formatter={(value) => {
-                  const num = typeof value === 'number' ? value : Number(value);
+                  const num = typeof value === "number" ? value : Number(value);
                   return [isNaN(num) ? value : num.toFixed(2)];
                 }}
               />
@@ -427,7 +441,7 @@ function App() {
                 }
                 stroke="#ff7f0e"
                 strokeWidth={1}
-                strokeDasharray="5 5"
+                strokeDasharray="4 4"
                 name="+1σ"
                 dot={false}
                 connectNulls={false}
@@ -439,7 +453,7 @@ function App() {
                 }
                 stroke="#ff7f0e"
                 strokeWidth={1}
-                strokeDasharray="5 5"
+                strokeDasharray="4 4"
                 name="-1σ"
                 dot={false}
                 connectNulls={false}
@@ -462,7 +476,12 @@ function App() {
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Загруженные файлы</h3>
-              <button className="modal-close" onClick={() => setShowFilesModal(false)}>×</button>
+              <button
+                className="modal-close"
+                onClick={() => setShowFilesModal(false)}
+              >
+                ×
+              </button>
             </div>
             <div className="modal-body">
               {importFiles.length === 0 ? (
@@ -483,7 +502,11 @@ function App() {
                         <td>{f.filename}</td>
                         <td className={f.status}>{f.status}</td>
                         <td>{f.records_count}</td>
-                        <td>{f.imported_at ? new Date(f.imported_at).toLocaleString('ru-RU') : '-'}</td>
+                        <td>
+                          {f.imported_at
+                            ? new Date(f.imported_at).toLocaleString("ru-RU")
+                            : "-"}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
