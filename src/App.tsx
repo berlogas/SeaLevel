@@ -1,17 +1,32 @@
-import { useState, useEffect } from 'react'
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Line, Legend } from 'recharts'
-import { useStore } from './store'
-import { importFiles as importFilesApi, aggregate, getImportLog, getDateRange } from './api'
+import { useState, useEffect } from "react";
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Line,
+  Legend,
+} from "recharts";
+import { useStore } from "./store";
+import {
+  importFiles as importFilesApi,
+  aggregate,
+  getImportLog,
+  getDateRange,
+} from "./api";
 
 const FREQUENCIES = [
-  { value: 'hour', label: 'Час' },
-  { value: 'day', label: 'День' },
-  { value: 'week', label: 'Неделя' },
-  { value: 'decade', label: 'Декада' },
-  { value: 'month', label: 'Месяц' },
-  { value: 'quarter', label: 'Квартал' },
-  { value: 'year', label: 'Год' },
-]
+  { value: "hour", label: "Час" },
+  { value: "day", label: "День" },
+  { value: "week", label: "Неделя" },
+  { value: "decade", label: "Декада" },
+  { value: "month", label: "Месяц" },
+  { value: "quarter", label: "Квартал" },
+  { value: "year", label: "Год" },
+];
 
 function App() {
   const {
@@ -37,144 +52,143 @@ function App() {
     setDateRange,
     error,
     setError,
-  } = useStore()
+  } = useStore();
 
-  const [calcTime, setCalcTime] = useState(0)
+  const [calcTime, setCalcTime] = useState(0);
 
   useEffect(() => {
-    loadInitialData()
-  }, [])
+    loadInitialData();
+  }, []);
 
   const loadInitialData = async () => {
     try {
-      const log = await getImportLog()
-      setImportFiles(log)
-      const range = await getDateRange()
-      setDateRange(range)
-      if (range.start) setStartDate(range.start)
-      if (range.end) setEndDate(range.end)
+      const log = await getImportLog();
+      setImportFiles(log);
+      const range = await getDateRange();
+      setDateRange(range);
+      if (range.start) setStartDate(range.start);
+      if (range.end) setEndDate(range.end);
     } catch (e) {
-      console.error('Failed to load initial data:', e)
+      console.error("Failed to load initial data:", e);
     }
-  }
+  };
 
   const handleImport = async () => {
     try {
-      let selected: any = null
-      let dialogLib: any = null
+      let selected: any = null;
+      let dialogLib: any = null;
       try {
-        dialogLib = await import('@tauri-apps/plugin-dialog')
+        dialogLib = await import("@tauri-apps/plugin-dialog");
       } catch (e) {
-        setError('Cannot load dialog: ' + String(e))
-        return
+        setError("Cannot load dialog: " + String(e));
+        return;
       }
-      
-      if (!dialogLib || typeof dialogLib.open !== 'function') {
-        setError('Dialog.open not found')
-        return
+
+      if (!dialogLib || typeof dialogLib.open !== "function") {
+        setError("Dialog.open not found");
+        return;
       }
-      
-      setIsImporting(true)
-      setImportProgress(10)
-      setImportStatus('Открытие диалога...')
-      
+
+      setIsImporting(true);
+      setImportProgress(10);
+      setImportStatus("Открытие диалога...");
+
       try {
         selected = await dialogLib.open({
           multiple: true,
-          filters: [{ name: 'Data Files', extensions: ['dat'] }],
-        })
+          filters: [{ name: "Data Files", extensions: ["dat"] }],
+        });
       } catch {
-        setIsImporting(false)
-        setImportProgress(0)
-        setImportStatus('')
-        setError('Диалог отменен')
-        return
-      }
-      
-      if (!selected) {
-        setIsImporting(false)
-        setImportProgress(0)
-        setImportStatus('')
-        return
+        setIsImporting(false);
+        setImportProgress(0);
+        setImportStatus("");
+        setError("Диалог отменен");
+        return;
       }
 
-      const files = Array.isArray(selected) ? selected : [selected]
-      if (files.length === 0) {
-        setIsImporting(false)
-        setImportProgress(0)
-        setImportStatus('')
-        return
+      if (!selected) {
+        setIsImporting(false);
+        setImportProgress(0);
+        setImportStatus("");
+        return;
       }
-      
-      setImportProgress(20)
-      setImportStatus(`Выбрано файлов: ${files.length}`)
-      setError(null)
+
+      const files = Array.isArray(selected) ? selected : [selected];
+      if (files.length === 0) {
+        setIsImporting(false);
+        setImportProgress(0);
+        setImportStatus("");
+        return;
+      }
+
+      setImportProgress(20);
+      setImportStatus(`Выбрано файлов: ${files.length}`);
+      setError(null);
 
       try {
-        setImportProgress(30)
-        setImportStatus('Импорт... (может занять несколько минут)')
-        
-        const result = await importFilesApi(files)
-        setImportProgress(90)
-        
-        if (result.files_processed > 0) {
-          const log = await getImportLog()
-          setImportFiles(log)
+        setImportProgress(30);
+        setImportStatus("Импорт... (может занять несколько минут)");
 
-          const range = await getDateRange()
-          setDateRange(range)
-          if (range.start) setStartDate(range.start)
-          if (range.end) setEndDate(range.end)
-          
-          setImportStatus(`Готово! Записей: ${result.records_count}`)
+        const result = await importFilesApi(files);
+        setImportProgress(90);
+
+        if (result.files_processed > 0) {
+          const log = await getImportLog();
+          setImportFiles(log);
+
+          const range = await getDateRange();
+          setDateRange(range);
+          if (range.start) setStartDate(range.start);
+          if (range.end) setEndDate(range.end);
+
+          setImportStatus(`Готово! Записей: ${result.records_count}`);
         } else {
-          setError('Файлы не найдены или пустые')
+          setError("Файлы не найдены или пустые");
         }
-        
+
         setTimeout(() => {
-          setIsImporting(false)
-          setImportProgress(0)
-          setImportStatus('')
-        }, 2000)
-        
+          setIsImporting(false);
+          setImportProgress(0);
+          setImportStatus("");
+        }, 2000);
       } catch (apiErr: any) {
-        setImportProgress(0)
-        setImportStatus('Ошибка')
-        setError('Ошибка: ' + (apiErr?.message || String(apiErr)))
-        setIsImporting(false)
+        setImportProgress(0);
+        setImportStatus("Ошибка");
+        setError("Ошибка: " + (apiErr?.message || String(apiErr)));
+        setIsImporting(false);
       }
     } catch (e: any) {
-      setImportProgress(0)
-      setImportStatus('')
-      setError('Ошибка: ' + (e?.message || String(e)))
-      setIsImporting(false)
+      setImportProgress(0);
+      setImportStatus("");
+      setError("Ошибка: " + (e?.message || String(e)));
+      setIsImporting(false);
     }
-  }
+  };
 
   const handleCalculate = async () => {
     if (!startDate || !endDate) {
-      setError('Выберите диапазон дат')
-      return
+      setError("Выберите диапазон дат");
+      return;
     }
     try {
-      setIsLoading(true)
-      setError(null)
-      const startTime = Date.now()
+      setIsLoading(true);
+      setError(null);
+      const startTime = Date.now();
 
-      const result = await aggregate(startDate, endDate, frequency)
-      setAggregateData(result.data)
-      setCalcTime(Date.now() - startTime)
+      const result = await aggregate(startDate, endDate, frequency);
+      setAggregateData(result.data);
+      setCalcTime(Date.now() - startTime);
     } catch (e: any) {
-      setError(e?.message || e?.toString() || 'Calculation failed')
+      setError(e?.message || e?.toString() || "Calculation failed");
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
   const handleExportCSV = () => {
-    if (aggregateData.length === 0) return
+    if (aggregateData.length === 0) return;
 
-    const headers = ['datetime', 'mean', 'std', 'min', 'max', 'count']
+    const headers = ["datetime", "mean", "std", "min", "max", "count"];
     const rows = aggregateData.map((d) => [
       d.datetime,
       d.mean,
@@ -182,17 +196,17 @@ function App() {
       d.min,
       d.max,
       d.count,
-    ])
+    ]);
 
-    const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n')
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `sealevel_${frequency}_${startDate}_${endDate}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
+    const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `sealevel_${frequency}_${startDate}_${endDate}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="app">
@@ -203,14 +217,21 @@ function App() {
 
       <div className="controls">
         <div className="control-group">
-          <button className="btn btn-primary" onClick={handleImport} disabled={isImporting}>
-            {isImporting ? 'Загрузка...' : 'Загрузить файлы'}
+          <button
+            className="btn btn-primary"
+            onClick={handleImport}
+            disabled={isImporting}
+          >
+            {isImporting ? "Загрузка..." : "Загрузить файлы"}
           </button>
-          
+
           {isImporting && (
             <div className="progress-section">
               <div className="progress-bar">
-                <div className="progress-fill" style={{width: `${importProgress}%`}} />
+                <div
+                  className="progress-fill"
+                  style={{ width: `${importProgress}%` }}
+                />
               </div>
               <div className="progress-text">
                 <span className="spinner"></span>
@@ -253,7 +274,10 @@ function App() {
 
         <div className="control-group">
           <label>Дискретность:</label>
-          <select value={frequency} onChange={(e) => setFrequency(e.target.value)}>
+          <select
+            value={frequency}
+            onChange={(e) => setFrequency(e.target.value)}
+          >
             {FREQUENCIES.map((f) => (
               <option key={f.value} value={f.value}>
                 {f.label}
@@ -263,15 +287,34 @@ function App() {
         </div>
 
         <div className="control-group">
-          <button className="btn btn-success" onClick={handleCalculate} disabled={isLoading}>
-            {isLoading ? 'Расчёт...' : 'Рассчитать'}
+          <button
+            className="btn btn-success"
+            onClick={handleCalculate}
+            disabled={isLoading}
+          >
+            {isLoading ? "Расчёт..." : "Рассчитать"}
           </button>
         </div>
       </div>
 
       {error && (
-        <div className="error" style={{display: 'flex', alignItems: 'center', gap: 8}}>
-          <button onClick={() => setError(null)} style={{padding: '4px 8px', background: '#721c24', color: 'white', border: 'none', borderRadius: 2, cursor: 'pointer'}}>X</button>
+        <div
+          className="error"
+          style={{ display: "flex", alignItems: "center", gap: 8 }}
+        >
+          <button
+            onClick={() => setError(null)}
+            style={{
+              padding: "4px 8px",
+              background: "#721c24",
+              color: "white",
+              border: "none",
+              borderRadius: 2,
+              cursor: "pointer",
+            }}
+          >
+            X
+          </button>
           {error}
         </div>
       )}
@@ -279,14 +322,21 @@ function App() {
       <div className="chart-container">
         <div className="chart-header">
           <h2>График уровня моря</h2>
-          <button className="btn btn-secondary" onClick={handleExportCSV} disabled={aggregateData.length === 0}>
+          <button
+            className="btn btn-secondary"
+            onClick={handleExportCSV}
+            disabled={aggregateData.length === 0}
+          >
             Экспорт CSV
           </button>
         </div>
 
         <div className="chart">
           <ResponsiveContainer width="100%" height={400}>
-            <AreaChart data={aggregateData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+            <AreaChart
+              data={aggregateData}
+              margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
+            >
               <defs>
                 <linearGradient id="stdGradient" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#006994" stopOpacity={0.3} />
@@ -294,27 +344,32 @@ function App() {
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#ccc" />
+
               <XAxis
-                dataKey="datetime"
-                tickFormatter={(v) => {
-                  try {
-                    const d = new Date(v)
-                    return `${d.getDate()}.${d.getMonth() + 1}`
-                  } catch {
-                    return ''
-                  }
+                type="number"
+                dataKey="timestamp"
+                domain={["auto", "auto"]}
+                tickFormatter={(ts) => {
+                  if (!ts) return "";
+                  const d = new Date(ts);
+                  return `${d.getDate().toString().padStart(2, "0")}.${(d.getMonth() + 1).toString().padStart(2, "0")}.${(d.getFullYear() % 100).toString().padStart(2, "0")}`;
                 }}
                 stroke="#666"
               />
+
               <YAxis stroke="#666" />
+
               <Tooltip
-                labelFormatter={(v) => new Date(v).toLocaleDateString('ru-RU')}
+                labelFormatter={(ts) => ts ? new Date(ts).toLocaleDateString("ru-RU") : "Нет данных"}
                 formatter={(value) => {
-                  const num = Array.isArray(value) ? value[0] : value
-                  return [num?.toFixed(2)]
+                  const num = typeof value === 'number' ? value : Number(value);
+                  return [isNaN(num) ? value : num.toFixed(2)];
                 }}
               />
+
               <Legend />
+
+              {/* 🔑 connectNulls={false} разрывает линию при пропусках данных */}
               <Area
                 type="monotone"
                 dataKey="mean"
@@ -322,24 +377,31 @@ function App() {
                 strokeWidth={2}
                 fill="url(#stdGradient)"
                 name="mean"
+                connectNulls={false}
               />
               <Line
                 type="monotone"
-                dataKey={(d) => d.mean + d.std}
+                dataKey={(d) =>
+                  d.mean !== null && d.std !== null ? d.mean + d.std : null
+                }
                 stroke="#ff7f0e"
                 strokeWidth={1}
                 strokeDasharray="5 5"
                 name="+1σ"
                 dot={false}
+                connectNulls={false}
               />
               <Line
                 type="monotone"
-                dataKey={(d) => d.mean - d.std}
+                dataKey={(d) =>
+                  d.mean !== null && d.std !== null ? d.mean - d.std : null
+                }
                 stroke="#ff7f0e"
                 strokeWidth={1}
                 strokeDasharray="5 5"
                 name="-1σ"
                 dot={false}
+                connectNulls={false}
               />
             </AreaChart>
           </ResponsiveContainer>
@@ -347,12 +409,14 @@ function App() {
       </div>
 
       <footer className="status-bar">
-        <span>Диапазон: {dateRange.start || '–'} – {dateRange.end || '–'}</span>
+        <span>
+          Диапазон: {dateRange.start || "–"} – {dateRange.end || "–"}
+        </span>
         <span>Точек: {aggregateData.length}</span>
         <span>Время расчёта: {calcTime} мс</span>
       </footer>
     </div>
-  )
+  );
 }
 
-export default App
+export default App;

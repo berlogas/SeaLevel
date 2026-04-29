@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 DB_PATH = "sealevel.duckdb"
 DUCKDB_CONFIG = {"threads": os.cpu_count() or 4, "memory_limit": "4GB"}
-MIN_VALID_TS = 946684800000  # 2000-01-01 00:00:00 UTC в миллисекундах
+MIN_VALID_TS = 946684800000  # 2000-01-01 00:00:00 UTC
 
 app = FastAPI(title="SeaLevel API")
 
@@ -86,6 +86,17 @@ FREQ_DUCKDB = {
     "year": "'year'",
 }
 
+# Интервалы в миллисекундах для построения равномерной сетки
+FREQ_INTERVAL_MS = {
+    "hour": 3_600_000,
+    "day": 86_400_000,
+    "week": 604_800_000,
+    "decade": 864_000_000,  # 10 дней
+    "month": 2_629_746_000,
+    "quarter": 7_889_238_000,
+    "year": 31_556_952_000,
+}
+
 
 def safe_float(value: Any) -> Optional[float]:
     if value is None:
@@ -146,7 +157,6 @@ def _process_import(files: List[str]):
                 continue
 
             csv_buffer = StringIO("\n".join(cleaned_lines))
-
             df: pd.DataFrame = pd.read_csv(
                 csv_buffer,
                 sep=r"\s+",
@@ -163,7 +173,6 @@ def _process_import(files: List[str]):
                 continue
 
             df["level"] = pd.to_numeric(df["level"], errors="coerce")
-
             raw = df["date"] + " " + df["time"]
             df["datetime"] = pd.to_datetime(
                 raw, format="%d.%m.%Y %H:%M:%S.%f", errors="coerce"
@@ -175,37 +184,22 @@ def _process_import(files: List[str]):
                     raw[mask], format="%d.%m.%Y %H:%M:%S", errors="coerce"
                 )
 
-            if bool(df["datetime"].isna().all()):
-                first_raw = raw.iloc[0] if not raw.empty else "empty"
-                print(
-                    f"⚠️ Could not parse ANY dates in {filename}. First raw: {first_raw}"
-                )
-
             df = df.dropna(subset=["datetime", "level"])
-
             if df.empty:
-                print(f"⚠️ No valid rows after parsing in {filename}")
                 conn.execute(
                     "UPDATE import_log SET status='ready', records_count=0 WHERE filename=?",
                     [filename],
                 )
                 continue
 
-            # 🔑 КОРРЕКТНАЯ конвертация: timestamp() возвращает секунды, умножаем на 1000 → миллисекунды
             df["timestamp_ms"] = (
                 df["datetime"]
                 .apply(lambda x: int(x.timestamp() * 1000))
                 .astype("int64")
             )
-
             valid_df = cast(pd.DataFrame, df[df["timestamp_ms"] > MIN_VALID_TS])
 
             if valid_df.empty:
-                first_ts = df["timestamp_ms"].iloc[0] if not df.empty else None
-                first_dt = df["datetime"].iloc[0] if not df.empty else None
-                print(
-                    f"⚠️ All dates in {filename} are < 2000. First: ts={first_ts}, dt={first_dt}"
-                )
                 conn.execute(
                     "UPDATE import_log SET status='ready', records_count=0 WHERE filename=?",
                     [filename],
@@ -213,8 +207,9 @@ def _process_import(files: List[str]):
                 continue
 
             valid_df["source_file"] = filename
-            cols = ["timestamp_ms", "level", "source_file"]
-            insert_df = cast(pd.DataFrame, valid_df[cols].copy())
+            insert_df = cast(
+                pd.DataFrame, valid_df[["timestamp_ms", "level", "source_file"]].copy()
+            )
             conn.from_df(insert_df).insert_into("sea_readings")
 
             count = len(insert_df)
@@ -244,7 +239,6 @@ def _process_import(files: List[str]):
 @app.post("/aggregate", response_model=AggregateResponse)
 def aggregate(req: AggregateRequest):
     conn = duckdb.connect(DB_PATH, config=DUCKDB_CONFIG)
-
     start_ms = int(datetime.strptime(req.start_date, "%d.%m.%Y").timestamp() * 1000)
     end_ms = (
         int(datetime.strptime(req.end_date, "%d.%m.%Y").timestamp() * 1000) + 86400000
@@ -272,26 +266,61 @@ def aggregate(req: AggregateRequest):
     records: List[Dict[str, Any]] = df.to_dict(orient="records")
     data: List[Dict[str, Any]] = []
     total_records = 0
+    prev_ts = None
 
     for row in records:
         dt_val = row.get("dt")
-        dt_str = pd.Timestamp(dt_val).isoformat() if dt_val is not None else ""
-        count_val = int(row["count"]) if row.get("count") is not None else 0
+        dt_str = ""
+        ts_ms = 0
+
+        if dt_val is not None and dt_val != "":
+            try:
+                if isinstance(dt_val, pd.Timestamp):
+                    ns = dt_val.value
+                    if ns != -9223372036854775808:  # NaT in nanoseconds
+                        ts_ms = ns // 10**6
+                        dt_str = dt_val.isoformat()
+                elif isinstance(dt_val, str):
+                    ts_obj = pd.Timestamp(dt_val)
+                    if not pd.isna(ts_obj):
+                        ns = ts_obj.value
+                        if ns != -9223372036854775808:
+                            ts_ms = ns // 10**6
+                            dt_str = ts_obj.isoformat()
+            except Exception:
+                pass
+
+        if prev_ts is not None and ts_ms > 0:
+            interval = FREQ_INTERVAL_MS.get(freq, 86400000)
+            gap_threshold = interval * 1.5
+            if (ts_ms - prev_ts) > gap_threshold:
+                data.append({
+                    "datetime": "",
+                    "timestamp": None,
+                    "mean": None,
+                    "std": None,
+                    "min": None,
+                    "max": None,
+                    "count": 0,
+                })
+
+        count_val = int(row.get("count") or 0) if row.get("count") is not None else 0
         total_records += count_val
 
-        data.append(
-            {
-                "datetime": dt_str,
-                "mean": safe_float(row.get("mean")),
-                "std": safe_float(row.get("std")) or 0.0,
-                "min": safe_float(row.get("min")),
-                "max": safe_float(row.get("max")),
-                "count": count_val,
-            }
-        )
+        data.append({
+            "datetime": dt_str,
+            "timestamp": ts_ms if ts_ms > 0 else None,
+            "mean": safe_float(row.get("mean")),
+            "std": safe_float(row.get("std")) or 0.0,
+            "min": safe_float(row.get("min")),
+            "max": safe_float(row.get("max")),
+            "count": count_val,
+        })
+        prev_ts = ts_ms if ts_ms > 0 else prev_ts
 
     return AggregateResponse(
-        data=data, stats={"count": len(data), "total_records": total_records}
+        data=data,
+        stats={"count": len(data), "total_records": total_records},
     )
 
 
@@ -320,10 +349,8 @@ def get_date_range():
         "SELECT MIN(timestamp_ms), MAX(timestamp_ms) FROM sea_readings"
     ).fetchone()
     conn.close()
-
     if res is None or res[0] is None or res[0] < MIN_VALID_TS:
         return {"start": None, "end": None}
-
     return {
         "start": datetime.fromtimestamp(res[0] / 1000).strftime("%d.%m.%Y"),
         "end": datetime.fromtimestamp(res[1] / 1000).strftime("%d.%m.%Y")
