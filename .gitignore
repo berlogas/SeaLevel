@@ -1,0 +1,27 @@
+# === Python ===
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+
+# === DuckDB (БД не коммитим!) ===
+*.duckdb
+*.duckdb.wal
+*.duckdb.shm
+
+# === Node.js / Tauri ===
+node_modules/
+dist/
+build/
+src-tauri/target/
+*.log
+
+# === IDE ===
+.vscode/
+.idea/
+*.swp
+
+# === OS ===
+.DS_Store
+Thumbs.db

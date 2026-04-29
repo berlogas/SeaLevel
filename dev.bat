@@ -1,0 +1,6 @@
+@echo off
+echo Starting SeaLevel API...
+start "SeaLevel API" cmd /k "cd /d N:\Development\SeaLevel\backend && .venv\Scripts\python.exe main.py"
+echo Starting Frontend...
+start cmd /k "cd /d N:\Development\SeaLevel && npm run dev"
+echo Done! Open http://localhost:5173

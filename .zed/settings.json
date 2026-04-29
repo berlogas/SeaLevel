@@ -1,0 +1,12 @@
+{
+  "lsp": {
+    "pyright": {
+      "settings": {
+        "python": {
+          "venvPath": "./backend",
+          "venv": ".venv",
+        },
+      },
+    },
+  },
+}
