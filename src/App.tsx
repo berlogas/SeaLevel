@@ -53,6 +53,8 @@ function App() {
     setDateRange,
     error,
     setError,
+    showFilesModal,
+    setShowFilesModal,
   } = useStore();
 
   const [calcTime, setCalcTime] = useState(0);
@@ -67,8 +69,14 @@ function App() {
       setImportFiles(log);
       const range = await getDateRange();
       setDateRange(range);
-      if (range.start) setStartDate(range.start);
-      if (range.end) setEndDate(range.end);
+      if (range.start) {
+        const [d, m, y] = range.start.split('.');
+        setStartDate(`${y}-${m}-${d}`);
+      }
+      if (range.end) {
+        const [d, m, y] = range.end.split('.');
+        setEndDate(`${y}-${m}-${d}`);
+      }
     } catch (e) {
       console.error("Failed to load initial data:", e);
     }
@@ -139,8 +147,14 @@ function App() {
 
           const range = await getDateRange();
           setDateRange(range);
-          if (range.start) setStartDate(range.start);
-          if (range.end) setEndDate(range.end);
+          if (range.start) {
+            const [d, m, y] = range.start.split('.');
+            setStartDate(`${y}-${m}-${d}`);
+          }
+          if (range.end) {
+            const [d, m, y] = range.end.split('.');
+            setEndDate(`${y}-${m}-${d}`);
+          }
 
           setImportStatus(`Готово! Записей: ${result.records_count}`);
         } else {
@@ -242,34 +256,57 @@ function App() {
           )}
 
           <div className="files-list">
-            {importFiles.slice(0, 5).map((f) => (
-              <div key={f.filename} className={`file-item ${f.status}`}>
-                <span className="filename">{f.filename}</span>
-                <span className="status">{f.status}</span>
-              </div>
-            ))}
-            {importFiles.length > 5 && (
-              <div className="more-files">+{importFiles.length - 5} файлов</div>
-            )}
+            <button 
+              className="btn-link" 
+              onClick={() => setShowFilesModal(true)}
+            >
+              Файлы ({importFiles.length})
+            </button>
           </div>
         </div>
 
         <div className="control-group">
           <label>Диапазон дат:</label>
           <div className="date-range">
-            <input
-              type="text"
-              placeholder="ДД.ММ.ГГГГ"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-            />
+            <div className="date-input-group">
+              <input
+                type="date"
+                className="date-native"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+              />
+              <button 
+                type="button" 
+                className="date-btn" 
+                onClick={() => {
+                  if (dateRange.start) {
+                    const [d, m, y] = dateRange.start.split('.');
+                    setStartDate(`${y}-${m}-${d}`);
+                  }
+                }}
+                title="Минимум из данных"
+              >↓</button>
+            </div>
             <span>–</span>
-            <input
-              type="text"
-              placeholder="ДД.ММ.ГГГГ"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-            />
+            <div className="date-input-group">
+              <input
+                type="date"
+                className="date-native"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+              />
+              <button 
+                type="button" 
+                className="date-btn" 
+                onClick={() => {
+                  if (dateRange.end) {
+                    const [d, m, y] = dateRange.end.split('.');
+                    setEndDate(`${y}-${m}-${d}`);
+                  }
+                }}
+                title="Максимум из данных"
+              >↑</button>
+            </div>
           </div>
         </div>
 
@@ -419,6 +456,43 @@ function App() {
         <span>Точек: {aggregateData.length}</span>
         <span>Время расчёта: {calcTime} мс</span>
       </footer>
+
+      {showFilesModal && (
+        <div className="modal-overlay" onClick={() => setShowFilesModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Загруженные файлы</h3>
+              <button className="modal-close" onClick={() => setShowFilesModal(false)}>×</button>
+            </div>
+            <div className="modal-body">
+              {importFiles.length === 0 ? (
+                <p>Нет загруженных файлов</p>
+              ) : (
+                <table className="files-table">
+                  <thead>
+                    <tr>
+                      <th>Файл</th>
+                      <th>Статус</th>
+                      <th>Записей</th>
+                      <th>Дата</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {importFiles.map((f) => (
+                      <tr key={f.filename}>
+                        <td>{f.filename}</td>
+                        <td className={f.status}>{f.status}</td>
+                        <td>{f.records_count}</td>
+                        <td>{f.imported_at ? new Date(f.imported_at).toLocaleString('ru-RU') : '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

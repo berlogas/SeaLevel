@@ -52,6 +52,9 @@ interface AppState {
   
   error: string | null
   setError: (error: string | null) => void
+  
+  showFilesModal: boolean
+  setShowFilesModal: (show: boolean) => void
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -90,4 +93,7 @@ export const useStore = create<AppState>((set) => ({
   
   error: null,
   setError: (error) => set({ error: error }),
+  
+  showFilesModal: false,
+  setShowFilesModal: (show) => set({ showFilesModal: show }),
 }))

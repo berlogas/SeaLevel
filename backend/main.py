@@ -238,13 +238,21 @@ def _process_import(files: List[str]):
     )
 
 
+def parse_date(date_str: str) -> datetime:
+    for fmt in ["%Y-%m-%d", "%d.%m.%Y"]:
+        try:
+            return datetime.strptime(date_str, fmt)
+        except ValueError:
+            continue
+    raise ValueError(f"Invalid date format: {date_str}")
+
 @app.post("/aggregate", response_model=AggregateResponse)
 def aggregate(req: AggregateRequest):
     conn = duckdb.connect(DB_PATH, config=DUCKDB_CONFIG)
-    start_ms = int(datetime.strptime(req.start_date, "%d.%m.%Y").timestamp() * 1000)
-    end_ms = (
-        int(datetime.strptime(req.end_date, "%d.%m.%Y").timestamp() * 1000) + 86400000
-    )
+    start_dt = parse_date(req.start_date)
+    end_dt = parse_date(req.end_date)
+    start_ms = int(start_dt.timestamp() * 1000)
+    end_ms = int(end_dt.timestamp() * 1000) + 86400000
 
     freq = req.frequency
     if freq == "decade":
@@ -267,8 +275,6 @@ def aggregate(req: AggregateRequest):
     if df.empty:
         return AggregateResponse(data=[], stats={"count": 0, "total_records": 0})
 
-    print(f"[DEBUG] freq={freq}, rows={len(df)}, first_dt={df['dt'].iloc[0] if not df.empty else 'empty'}, dt_dtype={df['dt'].dtype}")
-
     if freq == "10min":
         df = df.copy()
         df["dt"] = pd.to_datetime(df["dt"])
@@ -283,7 +289,6 @@ def aggregate(req: AggregateRequest):
             "max": "max",
             "count": "sum"
         }).reset_index()
-        print(f"[DEBUG] after groupby, rows={len(df)}, first_dt={df['dt'].iloc[0] if not df.empty else 'empty'}")
 
     records: List[Dict[str, Any]] = df.to_dict(orient="records")
     data: List[Dict[str, Any]] = []
