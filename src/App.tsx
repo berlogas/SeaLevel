@@ -19,6 +19,7 @@ import {
 } from "./api";
 
 const FREQUENCIES = [
+  { value: "10min", label: "10 минут" },
   { value: "hour", label: "Час" },
   { value: "day", label: "День" },
   { value: "week", label: "Неделя" },
@@ -352,6 +353,9 @@ function App() {
                 tickFormatter={(ts) => {
                   if (!ts) return "";
                   const d = new Date(ts);
+                  if (frequency === "10min") {
+                    return `${d.getDate().toString().padStart(2, "0")}.${(d.getMonth() + 1).toString().padStart(2, "0")} ${d.getHours().toString().padStart(2, "0")}:${(Math.floor(d.getMinutes() / 10) * 10).toString().padStart(2, "0")}`;
+                  }
                   return `${d.getDate().toString().padStart(2, "0")}.${(d.getMonth() + 1).toString().padStart(2, "0")}.${(d.getFullYear() % 100).toString().padStart(2, "0")}`;
                 }}
                 stroke="#666"

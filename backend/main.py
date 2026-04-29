@@ -78,6 +78,7 @@ class AggregateResponse(BaseModel):
 
 
 FREQ_DUCKDB = {
+    "10min": "'hour'",
     "hour": "'hour'",
     "day": "'day'",
     "week": "'week'",
@@ -88,10 +89,11 @@ FREQ_DUCKDB = {
 
 # Интервалы в миллисекундах для построения равномерной сетки
 FREQ_INTERVAL_MS = {
+    "10min": 600_000,
     "hour": 3_600_000,
     "day": 86_400_000,
     "week": 604_800_000,
-    "decade": 864_000_000,  # 10 дней
+    "decade": 864_000_000,
     "month": 2_629_746_000,
     "quarter": 7_889_238_000,
     "year": 31_556_952_000,
@@ -247,6 +249,8 @@ def aggregate(req: AggregateRequest):
     freq = req.frequency
     if freq == "decade":
         group_clause = "date_trunc('day', EPOCH_MS(timestamp_ms)) - INTERVAL '1 day' * ((datepart('day', EPOCH_MS(timestamp_ms)) - 1) % 10)"
+    elif freq == "10min":
+        group_clause = "date_trunc('minute', EPOCH_MS(timestamp_ms))"
     else:
         trunc = FREQ_DUCKDB.get(freq, "'day'")
         group_clause = f"date_trunc({trunc}, EPOCH_MS(timestamp_ms))"
@@ -262,6 +266,24 @@ def aggregate(req: AggregateRequest):
 
     if df.empty:
         return AggregateResponse(data=[], stats={"count": 0, "total_records": 0})
+
+    print(f"[DEBUG] freq={freq}, rows={len(df)}, first_dt={df['dt'].iloc[0] if not df.empty else 'empty'}, dt_dtype={df['dt'].dtype}")
+
+    if freq == "10min":
+        df = df.copy()
+        df["dt"] = pd.to_datetime(df["dt"])
+        df = df.sort_values("dt")
+        # floor to 10min intervals
+        dt_floor = df["dt"].dt.floor("10min")
+        df = df.assign(dt=dt_floor)
+        df = df.groupby("dt").agg({
+            "mean": "mean",
+            "std": "std",
+            "min": "min",
+            "max": "max",
+            "count": "sum"
+        }).reset_index()
+        print(f"[DEBUG] after groupby, rows={len(df)}, first_dt={df['dt'].iloc[0] if not df.empty else 'empty'}")
 
     records: List[Dict[str, Any]] = df.to_dict(orient="records")
     data: List[Dict[str, Any]] = []
