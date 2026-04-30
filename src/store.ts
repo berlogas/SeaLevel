@@ -2,10 +2,11 @@ import { create } from 'zustand'
 
 export interface DataPoint {
   datetime: string
-  mean: number
-  std: number
-  min: number
-  max: number
+  timestamp: number
+  mean: number | null
+  std: number | null
+  min: number | null
+  max: number | null
   count: number
 }
 
