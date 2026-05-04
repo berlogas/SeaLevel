@@ -31,10 +31,9 @@ export default function SeaLevelUPlot({
     const n: (number | null)[] = [];
 
     data.forEach((d) => {
-      if (d.mean === null) return;
       t.push(d.timestamp / 1000);
       m.push(d.mean);
-      if (d.std != null) {
+      if (d.std != null && d.mean != null) {
         p.push(d.mean + d.std);
         n.push(d.mean - d.std);
       } else {
@@ -134,9 +133,9 @@ export default function SeaLevelUPlot({
           value: (_u, v) =>
             v ? new Date(v * 1000).toLocaleString("ru-RU") : "",
         },
-        { label: "Среднее", stroke: "#006994", width: 2.8 },
-        { label: "+1σ", stroke: "#ff7f0e", width: 1.5, dash: [5, 3] },
-        { label: "-1σ", stroke: "#ff7f0e", width: 1.5, dash: [5, 3] },
+        { label: "Среднее", stroke: "#006994", width: 2.8, spanGaps: false },
+        { label: "+1σ", stroke: "#ff7f0e", width: 1.5, dash: [5, 3], spanGaps: false },
+        { label: "-1σ", stroke: "#ff7f0e", width: 1.5, dash: [5, 3], spanGaps: false },
       ],
 
       axes: [
