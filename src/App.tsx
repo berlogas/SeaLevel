@@ -1,15 +1,4 @@
 import { useState, useEffect } from "react";
-import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Line,
-  Legend,
-} from "recharts";
 import { useStore } from "./store";
 import {
   importFiles as importFilesApi,
@@ -17,6 +6,7 @@ import {
   getImportLog,
   getDateRange,
 } from "./api";
+import SeaLevelUPlot from "./components/SeaLevelUPlot";
 
 const FREQUENCIES = [
   { value: "10min", label: "10 минут" },
@@ -58,7 +48,6 @@ function App() {
   } = useStore();
 
   const [calcTime, setCalcTime] = useState(0);
-  const [chartDomain, setChartDomain] = useState<[number, number] | null>(null);
 
   useEffect(() => {
     loadInitialData();
@@ -68,13 +57,15 @@ function App() {
     try {
       const log = await getImportLog();
       setImportFiles(log);
+
       const range = await getDateRange();
       setDateRange(range);
-      if (range.start) {
+
+      if (range.start && !startDate) {
         const [d, m, y] = range.start.split(".");
         setStartDate(`${y}-${m}-${d}`);
       }
-      if (range.end) {
+      if (range.end && !endDate) {
         const [d, m, y] = range.end.split(".");
         setEndDate(`${y}-${m}-${d}`);
       }
@@ -87,6 +78,7 @@ function App() {
     try {
       let selected: any = null;
       let dialogLib: any = null;
+
       try {
         dialogLib = await import("@tauri-apps/plugin-dialog");
       } catch (e) {
@@ -94,89 +86,48 @@ function App() {
         return;
       }
 
-      if (!dialogLib || typeof dialogLib.open !== "function") {
-        setError("Dialog.open not found");
-        return;
-      }
-
       setIsImporting(true);
-      setImportProgress(10);
+      setImportProgress(0);
       setImportStatus("Открытие диалога...");
 
-      try {
-        selected = await dialogLib.open({
-          multiple: true,
-          filters: [{ name: "Data Files", extensions: ["dat"] }],
-        });
-      } catch {
-        setIsImporting(false);
-        setImportProgress(0);
-        setImportStatus("");
-        setError("Диалог отменен");
-        return;
-      }
+      selected = await dialogLib.open({
+        multiple: true,
+        filters: [{ name: "Data Files", extensions: ["dat"] }],
+      });
 
       if (!selected) {
         setIsImporting(false);
-        setImportProgress(0);
-        setImportStatus("");
         return;
       }
 
       const files = Array.isArray(selected) ? selected : [selected];
       if (files.length === 0) {
         setIsImporting(false);
-        setImportProgress(0);
-        setImportStatus("");
         return;
       }
 
       setImportProgress(20);
       setImportStatus(`Выбрано файлов: ${files.length}`);
-      setError(null);
 
-      try {
-        setImportProgress(30);
-        setImportStatus("Импорт... (может занять несколько минут)");
+      const result = await importFilesApi(files);
 
-        const result = await importFilesApi(files);
-        setImportProgress(90);
+      if (result.files_processed > 0) {
+        const log = await getImportLog();
+        setImportFiles(log);
 
-        if (result.files_processed > 0) {
-          const log = await getImportLog();
-          setImportFiles(log);
+        const range = await getDateRange();
+        setDateRange(range);
 
-          const range = await getDateRange();
-          setDateRange(range);
-          if (range.start) {
-            const [d, m, y] = range.start.split(".");
-            setStartDate(`${y}-${m}-${d}`);
-          }
-          if (range.end) {
-            const [d, m, y] = range.end.split(".");
-            setEndDate(`${y}-${m}-${d}`);
-          }
-
-          setImportStatus(`Готово! Записей: ${result.records_count}`);
-        } else {
-          setError("Файлы не найдены или пустые");
-        }
-
-        setTimeout(() => {
-          setIsImporting(false);
-          setImportProgress(0);
-          setImportStatus("");
-        }, 2000);
-      } catch (apiErr: any) {
-        setImportProgress(0);
-        setImportStatus("Ошибка");
-        setError("Ошибка: " + (apiErr?.message || String(apiErr)));
-        setIsImporting(false);
+        setImportStatus(`Готово! Записей: ${result.records_count}`);
       }
+
+      setTimeout(() => {
+        setIsImporting(false);
+        setImportProgress(0);
+        setImportStatus("");
+      }, 1500);
     } catch (e: any) {
-      setImportProgress(0);
-      setImportStatus("");
-      setError("Ошибка: " + (e?.message || String(e)));
+      setError("Ошибка импорта: " + (e?.message || String(e)));
       setIsImporting(false);
     }
   };
@@ -186,26 +137,17 @@ function App() {
       setError("Выберите диапазон дат");
       return;
     }
+
     try {
       setIsLoading(true);
       setError(null);
       const startTime = Date.now();
 
-      const startD = new Date(startDate);
-      const endD = new Date(endDate);
-      const startMonthStart = new Date(
-        startD.getFullYear(),
-        startD.getMonth(),
-        1,
-      );
-      const endMonthEnd = new Date(endD.getFullYear(), endD.getMonth() + 1, 0);
-      setChartDomain([startMonthStart.getTime(), endMonthEnd.getTime()]);
-
       const result = await aggregate(startDate, endDate, frequency);
       setAggregateData(result.data);
       setCalcTime(Date.now() - startTime);
     } catch (e: any) {
-      setError(e?.message || e?.toString() || "Calculation failed");
+      setError(e?.message || "Ошибка расчёта");
     } finally {
       setIsLoading(false);
     }
@@ -217,10 +159,10 @@ function App() {
     const headers = ["datetime", "mean", "std", "min", "max", "count"];
     const rows = aggregateData.map((d) => [
       d.datetime,
-      d.mean,
-      d.std,
-      d.min,
-      d.max,
+      d.mean ?? "",
+      d.std ?? "",
+      d.min ?? "",
+      d.max ?? "",
       d.count,
     ]);
 
@@ -259,10 +201,7 @@ function App() {
                   style={{ width: `${importProgress}%` }}
                 />
               </div>
-              <div className="progress-text">
-                <span className="spinner"></span>
-                {importStatus}
-              </div>
+              <div className="progress-text">{importStatus}</div>
             </div>
           )}
 
@@ -279,49 +218,17 @@ function App() {
         <div className="control-group">
           <label>Диапазон дат:</label>
           <div className="date-range">
-            <div className="date-input-group">
-              <input
-                type="date"
-                className="date-native"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-              />
-              <button
-                type="button"
-                className="date-btn"
-                onClick={() => {
-                  if (dateRange.start) {
-                    const [d, m, y] = dateRange.start.split(".");
-                    setStartDate(`${y}-${m}-${d}`);
-                  }
-                }}
-                title="Минимум из данных"
-              >
-                ↓
-              </button>
-            </div>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+            />
             <span>–</span>
-            <div className="date-input-group">
-              <input
-                type="date"
-                className="date-native"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-              />
-              <button
-                type="button"
-                className="date-btn"
-                onClick={() => {
-                  if (dateRange.end) {
-                    const [d, m, y] = dateRange.end.split(".");
-                    setEndDate(`${y}-${m}-${d}`);
-                  }
-                }}
-                title="Максимум из данных"
-              >
-                ↑
-              </button>
-            </div>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+            />
           </div>
         </div>
 
@@ -351,23 +258,8 @@ function App() {
       </div>
 
       {error && (
-        <div
-          className="error"
-          style={{ display: "flex", alignItems: "center", gap: 8 }}
-        >
-          <button
-            onClick={() => setError(null)}
-            style={{
-              padding: "4px 8px",
-              background: "#721c24",
-              color: "white",
-              border: "none",
-              borderRadius: 2,
-              cursor: "pointer",
-            }}
-          >
-            X
-          </button>
+        <div className="error">
+          <button onClick={() => setError(null)}>✕</button>
           {error}
         </div>
       )}
@@ -385,85 +277,11 @@ function App() {
         </div>
 
         <div className="chart">
-          <ResponsiveContainer width="100%" height={400}>
-            <AreaChart
-              data={aggregateData}
-              margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
-            >
-              <defs>
-                <linearGradient id="stdGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="3%" stopColor="#006994" stopOpacity={0.3} />
-                  <stop offset="97%" stopColor="#006994" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#ccc" />
-
-              <XAxis
-                type="number"
-                dataKey="timestamp"
-                domain={chartDomain || ["auto", "auto"]}
-                tickCount={10}
-                tickFormatter={(ts) => {
-                  if (!ts) return "";
-                  const d = new Date(ts);
-                  if (frequency === "10min") {
-                    return `${d.getDate().toString().padStart(2, "0")}.${(d.getMonth() + 1).toString().padStart(2, "0")} ${d.getHours().toString().padStart(2, "0")}:${(Math.floor(d.getMinutes() / 10) * 10).toString().padStart(2, "0")}`;
-                  }
-                  return `${d.getDate().toString().padStart(2, "0")}.${(d.getMonth() + 1).toString().padStart(2, "0")}.${(d.getFullYear() % 100).toString().padStart(2, "0")}`;
-                }}
-                stroke="#666"
-              />
-
-              <YAxis stroke="#666" />
-
-              <Tooltip
-                labelFormatter={(ts) =>
-                  ts ? new Date(ts).toLocaleDateString("ru-RU") : "Нет данных"
-                }
-                formatter={(value) => {
-                  const num = typeof value === "number" ? value : Number(value);
-                  return [isNaN(num) ? value : num.toFixed(2)];
-                }}
-              />
-
-              <Legend />
-
-              {/* 🔑 connectNulls={false} разрывает линию при пропусках данных */}
-              <Area
-                type="monotone"
-                dataKey="mean"
-                stroke="#006994"
-                strokeWidth={2}
-                fill="url(#stdGradient)"
-                name="mean"
-                connectNulls={false}
-              />
-              <Line
-                type="monotone"
-                dataKey={(d) =>
-                  d.mean !== null && d.std !== null ? d.mean + d.std : null
-                }
-                stroke="#ff7f0e"
-                strokeWidth={1}
-                strokeDasharray="4 4"
-                name="+1σ"
-                dot={false}
-                connectNulls={false}
-              />
-              <Line
-                type="monotone"
-                dataKey={(d) =>
-                  d.mean !== null && d.std !== null ? d.mean - d.std : null
-                }
-                stroke="#ff7f0e"
-                strokeWidth={1}
-                strokeDasharray="4 4"
-                name="-1σ"
-                dot={false}
-                connectNulls={false}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
+          <SeaLevelUPlot
+            data={aggregateData}
+            frequency={frequency}
+            height={480}
+          />
         </div>
       </div>
 
@@ -475,17 +293,13 @@ function App() {
         <span>Время расчёта: {calcTime} мс</span>
       </footer>
 
+      {/* Модальное окно */}
       {showFilesModal && (
         <div className="modal-overlay" onClick={() => setShowFilesModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3>Загруженные файлы</h3>
-              <button
-                className="modal-close"
-                onClick={() => setShowFilesModal(false)}
-              >
-                ×
-              </button>
+              <button onClick={() => setShowFilesModal(false)}>×</button>
             </div>
             <div className="modal-body">
               {importFiles.length === 0 ? (
@@ -497,7 +311,7 @@ function App() {
                       <th>Файл</th>
                       <th>Статус</th>
                       <th>Записей</th>
-                      <th>Дата</th>
+                      <th>Дата импорта</th>
                     </tr>
                   </thead>
                   <tbody>
