@@ -71,7 +71,10 @@ export default function SeaLevelUPlot({
     const dataMin = chartData.time[0];
     const dataMax = chartData.time[chartData.time.length - 1];
     const clampedRange = Math.min(newRange, dataMax - dataMin);
-    u.setScale("x", { min: center - clampedRange / 2, max: center + clampedRange / 2 });
+    u.setScale("x", {
+      min: center - clampedRange / 2,
+      max: center + clampedRange / 2,
+    });
   }, [chartData.time]);
 
   const panLeft = useCallback(() => {
@@ -133,9 +136,21 @@ export default function SeaLevelUPlot({
           value: (_u, v) =>
             v ? new Date(v * 1000).toLocaleString("ru-RU") : "",
         },
-        { label: "Среднее", stroke: "#006994", width: 2.8, spanGaps: false },
-        { label: "+1σ", stroke: "#ff7f0e", width: 1.5, dash: [5, 3], spanGaps: false },
-        { label: "-1σ", stroke: "#ff7f0e", width: 1.5, dash: [5, 3], spanGaps: false },
+        { label: "Среднее", stroke: "#006994", width: 2.8, spanGaps: true },
+        {
+          label: "+1σ",
+          stroke: "#ff7f0e",
+          width: 1.5,
+          dash: [5, 3],
+          spanGaps: true,
+        },
+        {
+          label: "-1σ",
+          stroke: "#ff7f0e",
+          width: 1.5,
+          dash: [5, 3],
+          spanGaps: true,
+        },
       ],
 
       axes: [
@@ -218,12 +233,30 @@ export default function SeaLevelUPlot({
 
   return (
     <div>
-      <div style={{ textAlign: "right", marginBottom: "6px", display: "flex", gap: "4px", justifyContent: "flex-end" }}>
-        <button onClick={panLeft} style={{ padding: "4px 8px" }}>←</button>
-        <button onClick={zoomOut} style={{ padding: "4px 10px" }}>−</button>
-        <button onClick={zoomIn} style={{ padding: "4px 10px" }}>+</button>
-        <button onClick={panRight} style={{ padding: "4px 8px" }}>→</button>
-        <button onClick={resetZoom} style={{ padding: "4px 10px" }}>Сброс</button>
+      <div
+        style={{
+          textAlign: "right",
+          marginBottom: "6px",
+          display: "flex",
+          gap: "4px",
+          justifyContent: "flex-end",
+        }}
+      >
+        <button onClick={panLeft} style={{ padding: "4px 8px" }}>
+          ←
+        </button>
+        <button onClick={zoomOut} style={{ padding: "4px 10px" }}>
+          −
+        </button>
+        <button onClick={zoomIn} style={{ padding: "4px 10px" }}>
+          +
+        </button>
+        <button onClick={panRight} style={{ padding: "4px 8px" }}>
+          →
+        </button>
+        <button onClick={resetZoom} style={{ padding: "4px 10px" }}>
+          Сброс
+        </button>
       </div>
       <div ref={chartRef} style={{ width: "100%", minHeight: height }} />
     </div>
