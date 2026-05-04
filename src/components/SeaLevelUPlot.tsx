@@ -1,4 +1,4 @@
-import { useEffect, useRef, useMemo } from "react";
+import { useEffect, useRef, useMemo, useCallback } from "react";
 import Uplot from "uplot";
 import "uplot/dist/uPlot.min.css";
 
@@ -45,6 +45,74 @@ export default function SeaLevelUPlot({
 
     return { time: t, mean: m, plusStd: p, minusStd: n };
   }, [data]);
+
+  const zoomIn = useCallback(() => {
+    if (!uplotRef.current) return;
+    const u = uplotRef.current;
+    const min = u.scales.x.min;
+    const max = u.scales.x.max;
+    if (min == null || max == null) return;
+
+    const range = max - min;
+    const center = min + range / 2;
+    const newRange = range * 0.7;
+    u.setScale("x", { min: center - newRange / 2, max: center + newRange / 2 });
+  }, []);
+
+  const zoomOut = useCallback(() => {
+    if (!uplotRef.current) return;
+    const u = uplotRef.current;
+    const min = u.scales.x.min;
+    const max = u.scales.x.max;
+    if (min == null || max == null) return;
+
+    const range = max - min;
+    const center = min + range / 2;
+    const newRange = range * 1.4;
+    const dataMin = chartData.time[0];
+    const dataMax = chartData.time[chartData.time.length - 1];
+    const clampedRange = Math.min(newRange, dataMax - dataMin);
+    u.setScale("x", { min: center - clampedRange / 2, max: center + clampedRange / 2 });
+  }, [chartData.time]);
+
+  const panLeft = useCallback(() => {
+    if (!uplotRef.current) return;
+    const u = uplotRef.current;
+    const min = u.scales.x.min;
+    const max = u.scales.x.max;
+    if (min == null || max == null) return;
+
+    const range = max - min;
+    const shift = range * 0.2;
+    const dataMin = chartData.time[0];
+    const dataMax = chartData.time[chartData.time.length - 1];
+    const newMin = Math.max(dataMin, min - shift);
+    const newMax = Math.max(dataMin + range, newMin + range);
+    u.setScale("x", { min: newMin, max: newMax });
+  }, [chartData.time]);
+
+  const panRight = useCallback(() => {
+    if (!uplotRef.current) return;
+    const u = uplotRef.current;
+    const min = u.scales.x.min;
+    const max = u.scales.x.max;
+    if (min == null || max == null) return;
+
+    const range = max - min;
+    const shift = range * 0.2;
+    const dataMin = chartData.time[0];
+    const dataMax = chartData.time[chartData.time.length - 1];
+    const newMax = Math.min(dataMax, max + shift);
+    const newMin = Math.min(dataMax - range, newMax - range);
+    u.setScale("x", { min: newMin, max: newMax });
+  }, [chartData.time]);
+
+  const resetZoom = useCallback(() => {
+    if (!uplotRef.current || chartData.time.length === 0) return;
+    const min = chartData.time[0];
+    const max = chartData.time[chartData.time.length - 1];
+    uplotRef.current.setScale("x", { min, max });
+  }, [chartData.time]);
 
   useEffect(() => {
     if (!chartRef.current || chartData.time.length === 0) return;
@@ -150,6 +218,15 @@ export default function SeaLevelUPlot({
   };
 
   return (
-    <div ref={chartRef} style={{ width: "100%", minHeight: height }} />
+    <div>
+      <div style={{ textAlign: "right", marginBottom: "6px", display: "flex", gap: "4px", justifyContent: "flex-end" }}>
+        <button onClick={panLeft} style={{ padding: "4px 8px" }}>←</button>
+        <button onClick={zoomOut} style={{ padding: "4px 10px" }}>−</button>
+        <button onClick={zoomIn} style={{ padding: "4px 10px" }}>+</button>
+        <button onClick={panRight} style={{ padding: "4px 8px" }}>→</button>
+        <button onClick={resetZoom} style={{ padding: "4px 10px" }}>Сброс</button>
+      </div>
+      <div ref={chartRef} style={{ width: "100%", minHeight: height }} />
+    </div>
   );
 }

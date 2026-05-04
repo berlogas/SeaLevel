@@ -5,7 +5,7 @@
 Запустите: python generate_sealevel.py
 """
 
-import os
+# import os
 from pathlib import Path
 
 PROJECT_NAME = "sealevel-app"
@@ -136,7 +136,6 @@ if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=8000)
 """,
-
     # ── Frontend Configs ─────────────────────────────────────────────────────
     f"{PROJECT_NAME}/frontend/package.json": """{
   "name": "sealevel-frontend",
@@ -220,7 +219,6 @@ export default defineConfig({
   </body>
 </html>
 """,
-
     # ── Frontend Source ──────────────────────────────────────────────────────
     f"{PROJECT_NAME}/frontend/src/main.tsx": """import React from 'react'
 import ReactDOM from 'react-dom/client'
@@ -368,7 +366,6 @@ export default function App() {
   );
 }
 """,
-
     # ── Tauri v2 ─────────────────────────────────────────────────────────────
     f"{PROJECT_NAME}/src-tauri/Cargo.toml": """[package]
 name = "sealevel"
@@ -426,10 +423,13 @@ fn main() {
 """,
 }
 
+
 def create_project():
     root = Path(PROJECT_NAME)
     if root.exists():
-        print(f"⚠️ Папка '{root}' уже существует. Очистите её или удалите перед запуском.")
+        print(
+            f"⚠️ Папка '{root}' уже существует. Очистите её или удалите перед запуском."
+        )
         return
 
     for rel_path, content in FILES.items():
@@ -449,6 +449,7 @@ def create_project():
     print("   4. cd ../frontend && npm install")
     print("   5. В корне проекта: npm install -D @tauri-apps/cli")
     print("   6. Запуск: npx tauri dev")
+
 
 if __name__ == "__main__":
     create_project()
