@@ -25,13 +25,13 @@ export default function SeaLevelUPlot({
   const uplotRef = useRef<Uplot | null>(null);
 
   const chartData = useMemo(() => {
-    const t: number[] = [];
+    const t: (number | null)[] = [];
     const m: (number | null)[] = [];
     const p: (number | null)[] = [];
     const n: (number | null)[] = [];
 
     data.forEach((d) => {
-      t.push(d.timestamp / 1000);
+      t.push(d.timestamp ? d.timestamp / 1000 : null);
       m.push(d.mean);
       if (d.std != null && d.mean != null) {
         p.push(d.mean + d.std);
@@ -41,6 +41,9 @@ export default function SeaLevelUPlot({
         n.push(null);
       }
     });
+
+    const nullCount = m.filter((x) => x === null).length;
+    console.log("[SeaLevelUPlot] points:", m.length, "nulls:", nullCount);
 
     return { time: t, mean: m, plusStd: p, minusStd: n };
   }, [data]);
@@ -68,8 +71,8 @@ export default function SeaLevelUPlot({
     const range = max - min;
     const center = min + range / 2;
     const newRange = range * 1.4;
-    const dataMin = chartData.time[0];
-    const dataMax = chartData.time[chartData.time.length - 1];
+    const dataMin = chartData.time[0] ?? 0;
+    const dataMax = chartData.time[chartData.time.length - 1] ?? 0;
     const clampedRange = Math.min(newRange, dataMax - dataMin);
     u.setScale("x", {
       min: center - clampedRange / 2,
@@ -86,8 +89,8 @@ export default function SeaLevelUPlot({
 
     const range = max - min;
     const shift = range * 0.2;
-    const dataMin = chartData.time[0];
-    const dataMax = chartData.time[chartData.time.length - 1];
+    const dataMin = chartData.time[0] ?? 0;
+    // const dataMax = chartData.time[chartData.time.length - 1] ?? 0;
     const newMin = Math.max(dataMin, min - shift);
     const newMax = Math.max(dataMin + range, newMin + range);
     u.setScale("x", { min: newMin, max: newMax });
@@ -102,8 +105,8 @@ export default function SeaLevelUPlot({
 
     const range = max - min;
     const shift = range * 0.2;
-    const dataMin = chartData.time[0];
-    const dataMax = chartData.time[chartData.time.length - 1];
+    // const dataMin = chartData.time[0] ?? 0;
+    const dataMax = chartData.time[chartData.time.length - 1] ?? 0;
     const newMax = Math.min(dataMax, max + shift);
     const newMin = Math.min(dataMax - range, newMax - range);
     u.setScale("x", { min: newMin, max: newMax });
@@ -111,8 +114,8 @@ export default function SeaLevelUPlot({
 
   const resetZoom = useCallback(() => {
     if (!uplotRef.current || chartData.time.length === 0) return;
-    const min = chartData.time[0];
-    const max = chartData.time[chartData.time.length - 1];
+    const min = chartData.time[0] ?? 0;
+    const max = chartData.time[chartData.time.length - 1] ?? 0;
     uplotRef.current.setScale("x", { min, max });
   }, [chartData.time]);
 
@@ -136,20 +139,20 @@ export default function SeaLevelUPlot({
           value: (_u, v) =>
             v ? new Date(v * 1000).toLocaleString("ru-RU") : "",
         },
-        { label: "Среднее", stroke: "#006994", width: 2.8, spanGaps: true },
+        { label: "Среднее", stroke: "#006994", width: 2.8, spanGaps: false },
         {
           label: "+1σ",
           stroke: "#ff7f0e",
           width: 1.5,
           dash: [5, 3],
-          spanGaps: true,
+          spanGaps: false,
         },
         {
           label: "-1σ",
           stroke: "#ff7f0e",
           width: 1.5,
           dash: [5, 3],
-          spanGaps: true,
+          spanGaps: false,
         },
       ],
 
@@ -164,7 +167,7 @@ export default function SeaLevelUPlot({
             const max = u.scales.x.max ?? 0;
 
             const visibleData = chartData.time.filter(
-              (t) => t >= min && t <= max,
+              (t): t is number => t !== null && t >= min && t <= max,
             );
 
             if (visibleData.length <= maxTicks) {
@@ -182,19 +185,26 @@ export default function SeaLevelUPlot({
             return splits;
           },
           values: (_u, vals) => {
-            return vals.map((v) => formatDate(v * 1000, isHighRes));
+            return vals
+              .filter((v): v is number => v !== null)
+              .map((v) => formatDate(v * 1000, isHighRes));
           },
         },
         { scale: "y", grid: { stroke: "#e5e5e5" }, ticks: { stroke: "#999" } },
       ],
 
-      cursor: { drag: { x: true, y: false } },
+      cursor: { drag: { x: true, y: false }, points: { show: false } },
       legend: { show: true },
     };
 
     uplotRef.current = new Uplot(
       opts,
-      [chartData.time, chartData.mean, chartData.plusStd, chartData.minusStd],
+      [
+        chartData.time,
+        chartData.mean,
+        chartData.plusStd,
+        chartData.minusStd,
+      ] as any,
       chartRef.current,
     );
 

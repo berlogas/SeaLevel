@@ -334,6 +334,7 @@ function App() {
           Диапазон: {dateRange.start || "–"} – {dateRange.end || "–"}
         </span>
         <span>Точек: {aggregateData.length}</span>
+        <span>Разрывов: {aggregateData.filter(d => d.mean === null || d.mean === undefined).length}</span>
         <span>Время расчёта: {calcTime} мс</span>
       </footer>
 

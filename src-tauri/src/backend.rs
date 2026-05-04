@@ -102,7 +102,7 @@ fn add_gap_points(data: &[DataPoint], interval_ms: i64, freq: &str) -> Vec<DataP
     };
 
     let max_gap_to_fill = match freq {
-        "10min" => 40 * 60_000i64,     // заполняем null только до 40 минут
+        "10min" => 3 * 24 * 60 * 60_000i64,     // до 3 дней - вставляем null для разрыва линии
         _       => interval_ms * 2,
     };
 
@@ -142,7 +142,17 @@ fn add_gap_points(data: &[DataPoint], interval_ms: i64, freq: &str) -> Vec<DataP
                     });
                 }
             } else {
-                log_to_file(&format!("BIG GAP ignored ({} ms) — line will break", diff));
+                log_to_file(&format!("BIG GAP ({} ms) → inserting 1 null point", diff));
+                let gap_ts = expected_ts + diff / 2;
+                result.push(DataPoint {
+                    datetime: format_datetime(gap_ts, freq),
+                    timestamp: gap_ts,
+                    mean: None,
+                    std: None,
+                    min: None,
+                    max: None,
+                    count: 0,
+                });
             }
         } else if diff > interval_ms {
             log_to_file(&format!("Small gap ignored: {} ms", diff));
@@ -207,17 +217,7 @@ fn downsample_points(data: Vec<DataPoint>, target: usize) -> Vec<DataPoint> {
         return data;
     }
     let step = (data.len() as f64 / target as f64).round() as usize;
-    let mut result = Vec::with_capacity(target);
-    result.push(data[0].clone());
-    for i in (1..target - 1).map(|j| j * step) {
-        if i < data.len() {
-            result.push(data[i].clone());
-        }
-    }
-    if data.len() > 1 {
-        result.push(data[data.len() - 1].clone());
-    }
-    result
+    (0..target).map(|i| data[(i * step).min(data.len() - 1)].clone()).collect()
 }
 
 fn parse_date_to_ms(date_str: &str) -> Result<i64, String> {
@@ -289,7 +289,10 @@ pub fn aggregate(
     log_to_file(&format!("AGGREGATE SUCCESS: {} points for freq={}", rows.len(), freq));
 
     let with_gaps = add_gap_points(&rows, interval_ms, &freq);
+    let nulls_before = with_gaps.iter().filter(|p| p.mean.is_none()).count();
     let final_data = downsample_points(with_gaps.clone(), MAX_CHART_POINTS);
+    let nulls_after = final_data.iter().filter(|p| p.mean.is_none()).count();
+    log_to_file(&format!("DOWNSAMPLE: {} -> {} points (nulls: {} -> {})", with_gaps.len(), final_data.len(), nulls_before, nulls_after));
 
     Ok(AggregateResponse {
         data: final_data.clone(),
