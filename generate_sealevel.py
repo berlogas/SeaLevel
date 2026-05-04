@@ -401,7 +401,7 @@ custom-protocol = ["tauri/custom-protocol"]
     "frontendDist": "../frontend/dist"
   },
   "app": {
-    "windows": [{ "title": "SeaLevel", "width": 1280, "height": 900 }],
+    "windows": [{ "title": "SeaLevel", "width": 1379, "height": 900 }],
     "security": { "csp": "default-src 'self'; connect-src http://localhost:* http://127.0.0.1:*" }
   },
   "bundle": {

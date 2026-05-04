@@ -13,11 +13,11 @@
     "windows": [
       {
         "title": "SeaLevel",
-        "width": 1200,
-        "height": 800,
+        "width": 1800,
+        "height": 900,
         "resizable": true,
         "fullscreen": false,
-        "minWidth": 800,
+        "minWidth": 1200,
         "minHeight": 600
       }
     ],

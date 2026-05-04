@@ -1,4 +1,4 @@
-import { useEffect, useRef, useMemo, useState, useCallback } from "react";
+import { useEffect, useRef, useMemo } from "react";
 import Uplot from "uplot";
 import "uplot/dist/uPlot.min.css";
 
@@ -12,16 +12,17 @@ interface Props {
   data: DataPoint[];
   frequency: string;
   height?: number;
+  onZoomChange?: (startMs: number, endMs: number) => void;
 }
 
 export default function SeaLevelUPlot({
   data,
   frequency,
   height = 480,
+  onZoomChange,
 }: Props) {
   const chartRef = useRef<HTMLDivElement>(null);
   const uplotRef = useRef<Uplot | null>(null);
-  const [isZoomed, setIsZoomed] = useState(false);
 
   const chartData = useMemo(() => {
     const t: number[] = [];
@@ -30,12 +31,10 @@ export default function SeaLevelUPlot({
     const n: (number | null)[] = [];
 
     data.forEach((d) => {
-      if (d.mean === null) return; // пропускаем точки без среднего
-
+      if (d.mean === null) return;
       t.push(d.timestamp / 1000);
       m.push(d.mean);
-
-      if (d.std != null && d.std > 0) {
+      if (d.std != null) {
         p.push(d.mean + d.std);
         n.push(d.mean - d.std);
       } else {
@@ -47,31 +46,17 @@ export default function SeaLevelUPlot({
     return { time: t, mean: m, plusStd: p, minusStd: n };
   }, [data]);
 
-  const resetZoom = useCallback(() => {
-    uplotRef.current?.setScale("x", { min: null as any, max: null as any });
-    setIsZoomed(false);
-  }, []);
-
-  const quickZoom = useCallback(
-    (days: number) => {
-      if (!uplotRef.current || chartData.time.length === 0) return;
-      const latest = chartData.time[chartData.time.length - 1];
-      const from = latest - days * 86400;
-      uplotRef.current.setScale("x", { min: from, max: latest });
-      setIsZoomed(true);
-    },
-    [chartData.time],
-  );
-
   useEffect(() => {
     if (!chartRef.current || chartData.time.length === 0) return;
 
     if (uplotRef.current) uplotRef.current.destroy();
 
+    const isHighRes = frequency === "10min" || frequency === "hour";
+
     const opts: Uplot.Options = {
       width: chartRef.current.offsetWidth,
       height: height,
-      padding: [20, 24, 40, 70],
+      padding: [20, 24, 50, 70],
 
       scales: { x: { time: true }, y: { auto: true } },
 
@@ -87,8 +72,38 @@ export default function SeaLevelUPlot({
       ],
 
       axes: [
-        { scale: "x", grid: { stroke: "#e5e5e5" } },
-        { scale: "y", grid: { stroke: "#e5e5e5" } },
+        {
+          scale: "x",
+          grid: { stroke: "#e5e5e5" },
+          ticks: { stroke: "#999" },
+          splits: (u: Uplot) => {
+            const maxTicks = 11;
+            const min = u.scales.x.min ?? 0;
+            const max = u.scales.x.max ?? 0;
+
+            const visibleData = chartData.time.filter(
+              (t) => t >= min && t <= max,
+            );
+
+            if (visibleData.length <= maxTicks) {
+              return visibleData;
+            }
+
+            const range = max - min;
+            if (range === 0) return [];
+
+            const step = range / (maxTicks - 1);
+            const splits: number[] = [];
+            for (let i = 0; i < maxTicks; i++) {
+              splits.push(min + i * step);
+            }
+            return splits;
+          },
+          values: (_u, vals) => {
+            return vals.map((v) => formatDate(v * 1000, isHighRes));
+          },
+        },
+        { scale: "y", grid: { stroke: "#e5e5e5" }, ticks: { stroke: "#999" } },
       ],
 
       cursor: { drag: { x: true, y: false } },
@@ -101,36 +116,40 @@ export default function SeaLevelUPlot({
       chartRef.current,
     );
 
-    return () => uplotRef.current?.destroy();
-  }, [chartData, height]);
+    // Перехват изменения зума
+    const onSetScale = (u: Uplot, scaleKey: string) => {
+      if (scaleKey === "x" && onZoomChange) {
+        const min = u.scales.x.min;
+        const max = u.scales.x.max;
+        if (min != null && max != null) {
+          onZoomChange(min * 1000, max * 1000);
+        }
+      }
+    };
+
+    uplotRef.current.hooks.setScale?.push(onSetScale);
+
+    return () => {
+      uplotRef.current?.destroy();
+      uplotRef.current = null;
+    };
+  }, [chartData, height, frequency, onZoomChange]);
+
+  const formatDate = (timestampMs: number, isHighRes: boolean): string => {
+    const d = new Date(timestampMs);
+    const day = d.getDate().toString().padStart(2, "0");
+    const month = (d.getMonth() + 1).toString().padStart(2, "0");
+    const year = (d.getFullYear() % 100).toString().padStart(2, "0");
+
+    if (isHighRes) {
+      const hours = d.getHours().toString().padStart(2, "0");
+      const minutes = d.getMinutes().toString().padStart(2, "0");
+      return `${day}.${month}.${year} ${hours}:${minutes}`;
+    }
+    return `${day}.${month}.${year}`;
+  };
 
   return (
-    <div>
-      <div
-        style={{
-          marginBottom: "10px",
-          textAlign: "right",
-          display: "flex",
-          gap: "6px",
-          justifyContent: "flex-end",
-          flexWrap: "wrap",
-        }}
-      >
-        <button onClick={() => quickZoom(30)}>30 дней</button>
-        <button onClick={() => quickZoom(90)}>3 месяца</button>
-        <button onClick={() => quickZoom(365)}>1 год</button>
-        <button onClick={() => quickZoom(365 * 3)}>3 года</button>
-        {isZoomed && (
-          <button
-            onClick={resetZoom}
-            style={{ background: "#dc3545", color: "white" }}
-          >
-            Сбросить зум
-          </button>
-        )}
-      </div>
-
-      <div ref={chartRef} style={{ width: "100%", minHeight: height }} />
-    </div>
+    <div ref={chartRef} style={{ width: "100%", minHeight: height }} />
   );
 }

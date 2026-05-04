@@ -176,6 +176,29 @@ function App() {
     URL.revokeObjectURL(url);
   };
 
+  // Быстрый зум
+  const setQuickPeriod = (days: number) => {
+    if (!dateRange.end) return;
+
+    const [d, m, y] = dateRange.end.split(".");
+    const end = new Date(`${y}-${m}-${d}`);
+    let start = new Date(end);
+
+    if (days === 0) {
+      // Весь период
+      if (dateRange.start) {
+        const [d, m, y] = dateRange.start.split(".");
+        start = new Date(`${y}-${m}-${d}`);
+      }
+    } else {
+      start = new Date(end);
+      start.setDate(start.getDate() - days);
+    }
+
+    setStartDate(start.toISOString().split("T")[0]);
+    setEndDate(end.toISOString().split("T")[0]);
+  };
+
   return (
     <div className="app">
       <header className="header">
@@ -233,6 +256,18 @@ function App() {
         </div>
 
         <div className="control-group">
+          <div className="control-group">
+            <label>Быстрый период:</label>
+            <div style={{ display: "flex", gap: "6px" }}>
+              <button className="btn-period" onClick={() => setQuickPeriod(30)}>30 дней</button>
+              <button className="btn-period" onClick={() => setQuickPeriod(90)}>3 месяца</button>
+              <button className="btn-period" onClick={() => setQuickPeriod(365)}>1 год</button>
+              <button className="btn-period" onClick={() => setQuickPeriod(0)}>Весь период</button>
+            </div>
+          </div>
+        </div>
+
+        <div className="control-group">
           <label>Дискретность:</label>
           <select
             value={frequency}
@@ -246,7 +281,15 @@ function App() {
           </select>
         </div>
 
-        <div className="control-group">
+        <div
+          className="control-group"
+          // style={{
+          //   display: "flex",
+          //   justifyContent: "space-between",
+          //   alignItems: "center",
+          //   width: "100%",
+          // }}
+        >
           <button
             className="btn btn-success"
             onClick={handleCalculate}
@@ -255,6 +298,18 @@ function App() {
             {isLoading ? "Расчёт..." : "Рассчитать"}
           </button>
         </div>
+
+        <div className="control-group">
+          <button
+            className="btn btn-secondary"
+            onClick={handleExportCSV}
+            disabled={aggregateData.length === 0}
+          >
+            Экспорт CSV
+          </button>
+        </div>
+
+        {/* Кнопки быстрого зума */}
       </div>
 
       {error && (
@@ -265,17 +320,6 @@ function App() {
       )}
 
       <div className="chart-container">
-        <div className="chart-header">
-          <h2>График уровня моря</h2>
-          <button
-            className="btn btn-secondary"
-            onClick={handleExportCSV}
-            disabled={aggregateData.length === 0}
-          >
-            Экспорт CSV
-          </button>
-        </div>
-
         <div className="chart">
           <SeaLevelUPlot
             data={aggregateData}
@@ -293,7 +337,6 @@ function App() {
         <span>Время расчёта: {calcTime} мс</span>
       </footer>
 
-      {/* Модальное окно */}
       {showFilesModal && (
         <div className="modal-overlay" onClick={() => setShowFilesModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
