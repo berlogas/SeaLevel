@@ -89,3 +89,30 @@ export async function getDateRange(): Promise<{ start: string | null; end: strin
     return { start: null, end: null }
   }
 }
+
+export async function exportFullData(
+  startDate: string,
+  endDate: string,
+  frequency: string
+): Promise<AggregateResult> {
+  if (isDev) {
+    const response = await httpFetch('/export_full', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ start_date: startDate, end_date: endDate, frequency }),
+    })
+    if (!response.ok) throw new Error('Export failed')
+    return response.json()
+  }
+  
+  try {
+    return await invoke('export_full_data', {
+      startDate,
+      endDate,
+      freq: frequency,
+    })
+  } catch (e) {
+    console.error('exportFullData error:', e)
+    throw e
+  }
+}

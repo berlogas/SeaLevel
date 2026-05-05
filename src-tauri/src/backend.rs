@@ -220,6 +220,66 @@ fn downsample_points(data: Vec<DataPoint>, target: usize) -> Vec<DataPoint> {
     (0..target).map(|i| data[(i * step).min(data.len() - 1)].clone()).collect()
 }
 
+#[tauri::command]
+pub fn export_full_data(
+    start_date: String,
+    end_date: String,
+    freq: String,
+    state: State<AppState>,
+) -> Result<AggregateResponse, String> {
+    let conn = open_db(&state)?;
+    let start_ms = parse_date_to_ms(&start_date)?;
+    let end_ms = parse_date_to_ms(&end_date)? + 86_400_000;
+
+    let group_expr = get_group_expr(&freq);
+    let interval_ms = get_interval_ms(&freq);
+
+    let query = format!(
+        "SELECT {} AS ts, AVG(level) AS mean, STDDEV_SAMP(level) AS std,
+                MIN(level) AS min, MAX(level) AS max, COUNT(*) AS count
+         FROM sea_readings
+         WHERE timestamp_ms BETWEEN {} AND {}
+         GROUP BY 1 ORDER BY 1",
+        group_expr, start_ms, end_ms
+    );
+
+    log_to_file(&format!("EXPORT_FULL freq={}, query starts with: {}", freq, &query[..std::cmp::min(280, query.len())]));
+
+    let mut stmt = match conn.prepare(&query) {
+        Ok(s) => s,
+        Err(e) => return Err(format!("Prepare error: {}", e)),
+    };
+
+    let rows: Vec<DataPoint> = stmt
+        .query_map([], |row| {
+            Ok(DataPoint {
+                datetime: String::new(),
+                timestamp: row.get(0).unwrap_or(0),
+                mean: row.get(1).ok(),
+                std: row.get(2).ok(),
+                min: row.get(3).ok(),
+                max: row.get(4).ok(),
+                count: row.get(5).unwrap_or(0),
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    log_to_file(&format!("EXPORT_FULL SUCCESS: {} points for freq={}", rows.len(), freq));
+
+    let with_gaps = add_gap_points(&rows, interval_ms, &freq);
+
+    Ok(AggregateResponse {
+        data: with_gaps.clone(),
+        stats: serde_json::json!({
+            "count": with_gaps.len(),
+            "raw_aggregated": rows.len(),
+            "freq_used": freq,
+        }),
+    })
+}
+
 fn parse_date_to_ms(date_str: &str) -> Result<i64, String> {
     if let Ok(dt) = chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
         return Ok(dt.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp_millis());
