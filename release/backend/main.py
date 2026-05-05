@@ -84,6 +84,7 @@ class AggregateResponse(BaseModel):
 
 
 FREQ_DUCKDB = {
+    "second": "'second'",
     "10min": "'hour'",
     "hour": "'hour'",
     "day": "'day'",
@@ -95,6 +96,7 @@ FREQ_DUCKDB = {
 
 # Интервалы в миллисекундах для построения равномерной сетки
 FREQ_INTERVAL_MS = {
+    "second": 1_000,
     "10min": 600_000,
     "hour": 3_600_000,
     "day": 86_400_000,

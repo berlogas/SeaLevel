@@ -124,7 +124,7 @@ export default function SeaLevelUPlot({
 
     if (uplotRef.current) uplotRef.current.destroy();
 
-    const isHighRes = frequency === "10min" || frequency === "hour";
+    const isHighRes = frequency === "second" || frequency === "10min" || frequency === "hour";
 
     const opts: Uplot.Options = {
       width: chartRef.current.offsetWidth,

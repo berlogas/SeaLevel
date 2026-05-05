@@ -10,6 +10,7 @@ import {
 import SeaLevelUPlot from "./components/SeaLevelUPlot";
 
 const FREQUENCIES = [
+  // { value: "second", label: "Секунда" },
   { value: "10min", label: "10 минут" },
   { value: "hour", label: "Час" },
   { value: "day", label: "День" },

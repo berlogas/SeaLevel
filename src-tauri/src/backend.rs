@@ -85,6 +85,7 @@ fn format_datetime(ts_ms: i64, freq: &str) -> String {
     };
     let year2 = dt.format("%y").to_string();
     match freq {
+        "second" => dt.format(&format!("%d.%m.{} %H:%M:%S", year2)).to_string(),
         "10min" | "hour" => dt.format(&format!("%d.%m.{} %H:%M", year2)).to_string(),
         _ => dt.format(&format!("%d.%m.{}", year2)).to_string(),
     }
@@ -97,11 +98,13 @@ fn add_gap_points(data: &[DataPoint], interval_ms: i64, freq: &str) -> Vec<DataP
     }
 
     let gap_threshold = match freq {
+        "second" => 10_000i64,        // разрыв линии при пропуске > 10 секунд
         "10min" => 20 * 60_000i64,     // разрыв линии при пропуске > 20 минут
         _       => (interval_ms as f64 * 1.5) as i64,
     };
 
     let max_gap_to_fill = match freq {
+        "second" => 60_000i64,         // до 1 минуты - вставляем null для разрыва линии
         "10min" => 3 * 24 * 60 * 60_000i64,     // до 3 дней - вставляем null для разрыва линии
         _       => interval_ms * 2,
     };
@@ -182,6 +185,7 @@ fn add_gap_points(data: &[DataPoint], interval_ms: i64, freq: &str) -> Vec<DataP
 
 fn get_group_expr(freq: &str) -> String {
     match freq {
+        "second" => "(timestamp_ms / 1000) * 1000".to_string(),
         "10min" => "epoch_ms(time_bucket(INTERVAL '10 minutes', EPOCH_MS(timestamp_ms)))".to_string(),
         "hour"  => "epoch_ms(date_trunc('hour', EPOCH_MS(timestamp_ms)))".to_string(),
         "day"   => "epoch_ms(date_trunc('day', EPOCH_MS(timestamp_ms)))".to_string(),
@@ -200,6 +204,7 @@ fn get_group_expr(freq: &str) -> String {
 
 fn get_interval_ms(freq: &str) -> i64 {
     match freq {
+        "second" => 1_000,
         "10min"  => 600_000,
         "hour"   => 3_600_000,
         "day"    => 86_400_000,
