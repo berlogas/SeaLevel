@@ -208,8 +208,16 @@ function App() {
 
       <div className="controls">
         <div className="control-group">
+          <div className="files-list">
+            <button
+              className="btn-link"
+              onClick={() => setShowFilesModal(true)}
+            >
+              Файлы ({importFiles.length})
+            </button>
+          </div>
           <button
-            className="btn btn-primary"
+            className="btn btn-primary  btn-offset2"
             onClick={handleImport}
             disabled={isImporting}
           >
@@ -227,15 +235,6 @@ function App() {
               <div className="progress-text">{importStatus}</div>
             </div>
           )}
-
-          <div className="files-list">
-            <button
-              className="btn-link"
-              onClick={() => setShowFilesModal(true)}
-            >
-              Файлы ({importFiles.length})
-            </button>
-          </div>
         </div>
 
         <div className="control-group">
@@ -256,15 +255,23 @@ function App() {
         </div>
 
         <div className="control-group">
-          <div className="control-group">
-            <label>Быстрый период:</label>
-            <div style={{ display: "flex", gap: "6px" }}>
-              <button className="btn-period" onClick={() => setQuickPeriod(30)}>30 дней</button>
-              <button className="btn-period" onClick={() => setQuickPeriod(90)}>3 месяца</button>
-              <button className="btn-period" onClick={() => setQuickPeriod(365)}>1 год</button>
-              <button className="btn-period" onClick={() => setQuickPeriod(0)}>Весь период</button>
-            </div>
+          {/*<div className="control-group">*/}
+          <label>Быстрый период:</label>
+          <div style={{ display: "flex", gap: "6px" }}>
+            <button className="btn-period" onClick={() => setQuickPeriod(30)}>
+              30 дней
+            </button>
+            <button className="btn-period" onClick={() => setQuickPeriod(90)}>
+              3 месяца
+            </button>
+            <button className="btn-period" onClick={() => setQuickPeriod(365)}>
+              1 год
+            </button>
+            <button className="btn-period" onClick={() => setQuickPeriod(0)}>
+              Весь период
+            </button>
           </div>
+          {/*</div>*/}
         </div>
 
         <div className="control-group">
@@ -283,15 +290,17 @@ function App() {
 
         <div
           className="control-group"
+
           // style={{
-          //   display: "flex",
-          //   justifyContent: "space-between",
-          //   alignItems: "center",
-          //   width: "100%",
+          //   marginTop: 8px,
+          //   // display: "flex",
+          //   // justifyContent: "space-between",
+          //   // alignItems: "center",
+          //   // width: "100%",
           // }}
         >
           <button
-            className="btn btn-success"
+            className="btn btn-success  btn-offset"
             onClick={handleCalculate}
             disabled={isLoading}
           >
@@ -301,11 +310,35 @@ function App() {
 
         <div className="control-group">
           <button
-            className="btn btn-secondary"
+            className="btn btn-secondary  btn-offset"
+            style={{
+              height: "36px",
+              minHeight: "36px",
+              padding: "4px 12px",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              lineHeight: "1",
+            }}
             onClick={handleExportCSV}
             disabled={aggregateData.length === 0}
+            aria-label="Экспорт CSV"
+            title="Экспорт CSV"
           >
-            Экспорт CSV
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
           </button>
         </div>
 
@@ -334,7 +367,13 @@ function App() {
           Диапазон: {dateRange.start || "–"} – {dateRange.end || "–"}
         </span>
         <span>Точек: {aggregateData.length}</span>
-        <span>Разрывов: {aggregateData.filter(d => d.mean === null || d.mean === undefined).length}</span>
+        <span>
+          Разрывов:{" "}
+          {
+            aggregateData.filter((d) => d.mean === null || d.mean === undefined)
+              .length
+          }
+        </span>
         <span>Время расчёта: {calcTime} мс</span>
       </footer>
 

@@ -122,6 +122,13 @@ body {
     background: #005073;
 }
 
+.btn-offset {
+    margin-top: 26px;
+}
+
+.btn-offset2 {
+    margin-top: 2px;
+}
 .progress-bar {
     height: 8px;
     background: #e0e0e0;
