@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{State, Window, Emitter};
 
-const MAX_CHART_POINTS: usize = 5500;
+const MAX_CHART_POINTS: usize = 10000;
 
 fn get_log_path() -> PathBuf {
     std::env::current_exe()
