@@ -1,4 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Фон - градиент моря -->
   <defs>
     <linearGradient id="seaGrad" x1="0%" y1="0%" x2="0%" y2="100%">
       <stop offset="0%" style="stop-color:#1a5276"/>
@@ -9,13 +10,25 @@
       <stop offset="100%" style="stop-color:#1a5276"/>
     </linearGradient>
   </defs>
+  
+  <!-- Круглый фон -->
   <circle cx="256" cy="256" r="240" fill="url(#seaGrad)"/>
+  
+  <!-- Волна 1 (нижняя) -->
   <path d="M40 320 Q130 280, 170 320 T300 320 T430 320 L480 400 L32 400 Z" fill="url(#waveGrad)" opacity="0.7"/>
+  
+  <!-- Волна 2 (средняя) -->
   <path d="M32 350 Q120 310, 170 350 T300 350 T440 350 L480 420 L32 420 Z" fill="#3498db" opacity="0.6"/>
+  
+  <!-- Волна 3 (передняя) -->
   <path d="M60 380 Q140 340, 200 380 T340 380 T450 380 L480 450 L60 450 Z" fill="#5dade2" opacity="0.8"/>
+  
+  <!-- Уровень (вертикальная линия) -->
   <rect x="180" y="120" width="8" height="200" fill="#f4d03f" rx="4"/>
   <circle cx="184" cy="120" r="16" fill="#f4d03f"/>
   <circle cx="184" cy="320" r="16" fill="#f4d03f"/>
+  
+  <!-- Стрелки уровня -->
   <path d="M160 100 L184 120 L208 100" stroke="#f4d03f" stroke-width="6" fill="none" stroke-linecap="round"/>
   <path d="M160 340 L184 320 L208 340" stroke="#f4d03f" stroke-width="6" fill="none" stroke-linecap="round"/>
 </svg>

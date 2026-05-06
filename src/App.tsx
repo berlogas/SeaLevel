@@ -70,6 +70,7 @@ function App() {
   }, []);
 
   const [calcTime, setCalcTime] = useState(0);
+  const [selectedPeriod, setSelectedPeriod] = useState(0); // 0 = весь период по умолчанию
 
   useEffect(() => {
     loadInitialData();
@@ -236,6 +237,7 @@ function App() {
 
     setStartDate(start.toISOString().split("T")[0]);
     setEndDate(end.toISOString().split("T")[0]);
+    setSelectedPeriod(days);
   };
 
   return (
@@ -322,20 +324,35 @@ function App() {
         <div className="control-group">
           <label>Быстрый период:</label>
           <div style={{ display: "flex", gap: "6px" }}>
-            <button className="btn-period" onClick={() => setQuickPeriod(30)}>
+            <button 
+              className="btn-period" 
+              onClick={() => setQuickPeriod(30)}
+              style={{ backgroundColor: selectedPeriod === 30 ? '#e7f5ff' : undefined }}
+            >
               30 дней
             </button>
-            <button className="btn-period" onClick={() => setQuickPeriod(90)}>
+            <button 
+              className="btn-period" 
+              onClick={() => setQuickPeriod(90)}
+              style={{ backgroundColor: selectedPeriod === 90 ? '#e7f5ff' : undefined }}
+            >
               3 месяца
             </button>
-            <button className="btn-period" onClick={() => setQuickPeriod(365)}>
+            <button 
+              className="btn-period" 
+              onClick={() => setQuickPeriod(365)}
+              style={{ backgroundColor: selectedPeriod === 365 ? '#e7f5ff' : undefined }}
+            >
               1 год
             </button>
-            <button className="btn-period" onClick={() => setQuickPeriod(0)}>
+            <button 
+              className="btn-period" 
+              onClick={() => setQuickPeriod(0)}
+              style={{ backgroundColor: selectedPeriod === 0 ? '#e7f5ff' : undefined }}
+            >
               Весь период
             </button>
           </div>
-          {/*</div>*/}
         </div>
 
         <div className="control-group">
