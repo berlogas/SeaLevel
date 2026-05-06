@@ -27,9 +27,9 @@ function App() {
     importFiles,
     isImporting,
     setIsImporting,
-    importProgress,
+    // importProgress,
     setImportProgress,
-    importStatus,
+    // importStatus,
     setImportStatus,
     startDate,
     setStartDate,
@@ -162,28 +162,28 @@ function App() {
     }
   };
 
-  const handleExportCSV = () => {
-    if (aggregateData.length === 0) return;
+  // const handleExportCSV = () => {
+  //   if (aggregateData.length === 0) return;
 
-    const headers = ["datetime", "mean", "std", "min", "max", "count"];
-    const rows = aggregateData.map((d) => [
-      d.datetime,
-      d.mean ?? "",
-      d.std ?? "",
-      d.min ?? "",
-      d.max ?? "",
-      d.count,
-    ]);
+  //   const headers = ["datetime", "mean", "std", "min", "max", "count"];
+  //   const rows = aggregateData.map((d) => [
+  //     d.datetime,
+  //     d.mean ?? "",
+  //     d.std ?? "",
+  //     d.min ?? "",
+  //     d.max ?? "",
+  //     d.count,
+  //   ]);
 
-    const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `sealevel_${frequency}_${startDate}_${endDate}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  //   const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+  //   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  //   const url = URL.createObjectURL(blob);
+  //   const a = document.createElement("a");
+  //   a.href = url;
+  //   a.download = `sealevel_${frequency}_${startDate}_${endDate}.csv`;
+  //   a.click();
+  //   URL.revokeObjectURL(url);
+  // };
 
   const handleExportFullCSV = async () => {
     try {

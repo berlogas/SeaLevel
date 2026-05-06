@@ -8,6 +8,23 @@ type DataPoint = {
   std?: number | null;
 };
 
+// Многострочный формат даты: дата сверху, время снизу
+function formatDateMultiLine(timestampMs: number, isHighRes: boolean): string {
+  const d = new Date(timestampMs);
+  const day = d.getDate().toString().padStart(2, "0");
+  const month = (d.getMonth() + 1).toString().padStart(2, "0");
+  const year = (d.getFullYear() % 100).toString().padStart(2, "0");
+  const date = `${day}.${month}.${year}`;
+
+  if (isHighRes) {
+    const hours = d.getHours().toString().padStart(2, "0");
+    const minutes = d.getMinutes().toString().padStart(2, "0");
+    const time = `${hours}:${minutes}`;
+    return `${date}\n${time}`;
+  }
+  return date;
+}
+
 interface Props {
   data: DataPoint[];
   frequency: string;
@@ -90,7 +107,6 @@ export default function SeaLevelUPlot({
     const range = max - min;
     const shift = range * 0.2;
     const dataMin = chartData.time[0] ?? 0;
-    // const dataMax = chartData.time[chartData.time.length - 1] ?? 0;
     const newMin = Math.max(dataMin, min - shift);
     const newMax = Math.max(dataMin + range, newMin + range);
     u.setScale("x", { min: newMin, max: newMax });
@@ -105,7 +121,6 @@ export default function SeaLevelUPlot({
 
     const range = max - min;
     const shift = range * 0.2;
-    // const dataMin = chartData.time[0] ?? 0;
     const dataMax = chartData.time[chartData.time.length - 1] ?? 0;
     const newMax = Math.min(dataMax, max + shift);
     const newMin = Math.min(dataMax - range, newMax - range);
@@ -187,7 +202,7 @@ export default function SeaLevelUPlot({
           values: (_u, vals) => {
             return vals
               .filter((v): v is number => v !== null)
-              .map((v) => formatDate(v * 1000, isHighRes));
+              .map((v) => formatDateMultiLine(v * 1000, isHighRes));
           },
         },
         { scale: "y", grid: { stroke: "#e5e5e5" }, ticks: { stroke: "#999" } },
@@ -226,20 +241,6 @@ export default function SeaLevelUPlot({
       uplotRef.current = null;
     };
   }, [chartData, height, frequency, onZoomChange]);
-
-  const formatDate = (timestampMs: number, isHighRes: boolean): string => {
-    const d = new Date(timestampMs);
-    const day = d.getDate().toString().padStart(2, "0");
-    const month = (d.getMonth() + 1).toString().padStart(2, "0");
-    const year = (d.getFullYear() % 100).toString().padStart(2, "0");
-
-    if (isHighRes) {
-      const hours = d.getHours().toString().padStart(2, "0");
-      const minutes = d.getMinutes().toString().padStart(2, "0");
-      return `${day}.${month}.${year} ${hours}:${minutes}`;
-    }
-    return `${day}.${month}.${year}`;
-  };
 
   return (
     <div>

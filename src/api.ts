@@ -12,7 +12,7 @@ async function httpFetch(path: string, options?: RequestInit) {
 export async function importFiles(
   files: string[],
   filterOutliers: boolean = false,
-  halfWindow: number = 5,
+  halfWindow: number = 100,
   k: number = 3.0
 ): Promise<{ status: string; files_processed: number; records_count: number; outliers_removed: number }> {
   if (isDev) {
