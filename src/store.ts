@@ -56,6 +56,10 @@ interface AppState {
   
   showFilesModal: boolean
   setShowFilesModal: (show: boolean) => void
+
+  // Фильтр при импорте
+  importFilterEnabled: boolean
+  setImportFilterEnabled: (enabled: boolean) => void
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -97,4 +101,8 @@ export const useStore = create<AppState>((set) => ({
   
   showFilesModal: false,
   setShowFilesModal: (show) => set({ showFilesModal: show }),
+
+  // Фильтр при импорте
+  importFilterEnabled: false,
+  setImportFilterEnabled: (enabled) => set({ importFilterEnabled: enabled }),
 }))

@@ -428,14 +428,19 @@ pub fn get_import_log(state: State<AppState>) -> Result<Vec<ImportFile>, String>
 #[tauri::command]
 pub fn import_files(
     files: Vec<String>,
+    filter_outliers: bool,
+    half_window: usize,
+    k: f64,
     state: State<AppState>,
     window: Window,
 ) -> Result<serde_json::Value, String> {
-    log_to_file(&format!("IMPORT START: {} files", files.len()));
+    log_to_file(&format!("=== IMPORT START: {} files, filter={}, half_window={}, k={} ===", 
+        files.len(), filter_outliers, half_window, k));
     let conn = open_db(&state)?;
-
+    
     let total_files = files.len();
     let mut total_records = 0i64;
+    let mut total_filtered = 0i64;
     let mut files_processed = 0i32;
     let start_time = std::time::Instant::now();
 
@@ -450,88 +455,172 @@ pub fn import_files(
             "current": index + 1,
             "total": total_files,
             "filename": filename,
-            "status": "Обработка файла..."
+            "status": "Чтение файла..."
         }));
-
-        let exists: Option<String> = conn.query_row(
-            "SELECT status FROM import_log WHERE filename = ? AND status = 'ready'",
-            params![&filename],
-            |row: &Row| row.get(0),
-        ).ok();
-
-        if exists.is_some() { continue; }
-
-        let _ = conn.execute(
-            "INSERT OR REPLACE INTO import_log (filename, status) VALUES (?, 'indexing')",
-            params![&filename],
-        );
 
         let safe_path = file_path.replace("'", "''");
         let safe_name = filename.replace("'", "''");
 
-        let query = format!(
-            "INSERT INTO sea_readings (timestamp_ms, level, source_file)
-             SELECT CAST(epoch_ms(strptime(col0 || ' ' || col1, '%d.%m.%Y %H:%M:%S.%f')) AS BIGINT),
-                    col2::DOUBLE, '{}'
+        // Шаг 1: Читаем файл во временную таблицу
+        let read_query = format!(
+            "CREATE TABLE IF NOT EXISTS import_temp AS
+             SELECT CAST(epoch_ms(strptime(col0 || ' ' || col1, '%d.%m.%Y %H:%M:%S.%f')) AS BIGINT) as timestamp_ms,
+                    col2::DOUBLE as level
              FROM read_csv('{}', header=false, sep=' ', auto_detect=false, sample_size=-1,
                  columns={{'col0': 'VARCHAR', 'col1': 'VARCHAR', 'col2': 'DOUBLE'}})
              WHERE col0 IS NOT NULL AND col0 != '' AND col2 IS NOT NULL
                AND CAST(epoch_ms(strptime(col0 || ' ' || col1, '%d.%m.%Y %H:%M:%S.%f')) AS BIGINT) > {}",
-            safe_name, safe_path, MIN_VALID_TS
+            safe_path, MIN_VALID_TS
         );
 
-        match conn.execute(&query, []) {
-            Ok(_) => {
-                let count: i64 = conn.query_row(
-                    "SELECT COUNT(*) FROM sea_readings WHERE source_file = ?",
-                    params![&filename],
-                    |row: &Row| row.get(0),
-                ).unwrap_or(0);
-
-                if count > 0 {
-                    files_processed += 1;
-                    total_records += count;
-                }
-
-                let _ = conn.execute(
-                    "UPDATE import_log SET status='ready', records_count=? WHERE filename=?",
-                    params![&count, &filename],
-                );
-            }
-            Err(e) => {
-                log_to_file(&format!("IMPORT ERROR {}: {}", filename, e));
-                let _ = conn.execute(
-                    "UPDATE import_log SET status='error', error_msg=? WHERE filename=?",
-                    params![&e.to_string(), &filename],
-                );
-            }
+        conn.execute("DROP TABLE IF EXISTS import_temp", []).ok();
+        
+        if let Err(e) = conn.execute(&read_query, []) {
+            log_to_file(&format!("IMPORT ERROR reading {}: {}", filename, e));
+            let _ = conn.execute(
+                "UPDATE import_log SET status='error', error_msg=? WHERE filename=?",
+                params![&e.to_string(), &filename],
+            );
+            continue;
         }
+
+        // Шаг 2: Определяем диапазон дат файла
+        let (min_ts, max_ts): (i64, i64) = {
+            let result: Result<(Option<i64>, Option<i64>), _> = conn.query_row(
+                "SELECT MIN(timestamp_ms), MAX(timestamp_ms) FROM import_temp",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            );
+            
+            match result {
+                Ok((Some(min), Some(max))) => (min, max),
+                _ => {
+                    // Пустой файл
+                    conn.execute("DROP TABLE IF EXISTS import_temp", []).ok();
+                    continue;
+                }
+            }
+        };
+
+        // Шаг 3: Удаляем старые данные в этом диапазоне
+        let deleted_old: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sea_readings WHERE timestamp_ms BETWEEN ? AND ?",
+            params![min_ts, max_ts],
+            |row| row.get(0),
+        ).unwrap_or(0);
+
+        conn.execute(
+            "DELETE FROM sea_readings WHERE timestamp_ms BETWEEN ? AND ?",
+            params![min_ts, max_ts],
+        ).ok();
+
+        if deleted_old > 0 {
+            log_to_file(&format!("IMPORT {}: deleted {} old records from DB (same date range)", 
+                filename, deleted_old));
+        }
+
+        // Запоминаем количество записей в файле ДО фильтрации
+        let raw_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM import_temp",
+            [],
+            |row: &Row| row.get(0),
+        ).unwrap_or(0);
+        
+        // Шаг 4: Фильтрация, если нужно
+        let insert_query = if filter_outliers {
+            format!(r#"
+                INSERT INTO sea_readings (timestamp_ms, level, source_file)
+                WITH windowed AS (
+                    SELECT 
+                        timestamp_ms,
+                        level,
+                        MEDIAN(level) OVER (ORDER BY timestamp_ms ROWS BETWEEN {} PRECEDING AND {} FOLLOWING) as window_median,
+                        MAD(level) OVER (ORDER BY timestamp_ms ROWS BETWEEN {} PRECEDING AND {} FOLLOWING) as window_mad
+                    FROM import_temp
+                )
+                SELECT timestamp_ms, level, '{}'
+                FROM windowed
+                WHERE window_mad = 0 OR ABS(level - window_median) <= {} * window_mad
+            "#, half_window, half_window, half_window, half_window, safe_name, k)
+        } else {
+            format!(
+                "INSERT INTO sea_readings (timestamp_ms, level, source_file) SELECT timestamp_ms, level, '{}' FROM import_temp",
+                safe_name
+            )
+        };
+
+        if let Err(e) = conn.execute(&insert_query, []) {
+            log_to_file(&format!("IMPORT ERROR inserting {}: {}", filename, e));
+            let _ = conn.execute(
+                "UPDATE import_log SET status='error', error_msg=? WHERE filename=?",
+                params![&e.to_string(), &filename],
+            );
+            conn.execute("DROP TABLE IF EXISTS import_temp", []).ok();
+            continue;
+        }
+
+        let _ = conn.execute("DROP TABLE IF EXISTS import_temp", []).ok();
+
+        // Подсчитываем результаты
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sea_readings WHERE source_file = ?",
+            params![&filename],
+            |row: &Row| row.get(0),
+        ).unwrap_or(0);
+
+        files_processed += 1;
+        total_records += count;
+
+        // Считаем отфильтрованные выбросы
+        if filter_outliers {
+            let outliers = raw_count - count;
+            total_filtered += outliers;
+            log_to_file(&format!("IMPORT FILE {}: {} records -> {} (outliers: {})", 
+                filename, raw_count, count, outliers));
+        } else {
+            log_to_file(&format!("IMPORT FILE {}: {} records", filename, raw_count));
+        }
+        
+        let _ = conn.execute(
+            "INSERT OR REPLACE INTO import_log (filename, status, records_count) VALUES (?, 'ready', ?)",
+            params![&filename, count],
+        );
 
         let elapsed = start_time.elapsed().as_secs_f32();
         let speed = if elapsed > 0.0 { (total_records as f32 / elapsed).round() } else { 0.0 };
+
+        let outliers_in_file = if filter_outliers { raw_count - count } else { 0 };
+        let status = if outliers_in_file > 0 {
+            format!("{} ({} выбросов) • {:.0} записей/сек", filename, outliers_in_file, speed)
+        } else {
+            format!("{} • {:.0} записей/сек", filename, speed)
+        };
 
         let _ = window.emit("import-progress", serde_json::json!({
             "progress": ((index as f32 + 1.0) / total_files as f32 * 100.0) as u8,
             "current": index + 1,
             "total": total_files,
             "filename": filename,
-            "status": format!("Обработано {} записей • {:.0} записей/сек", total_records, speed),
+            "status": status,
         }));
     }
+
+    let _ = conn.execute("DELETE FROM aggregates", []);
 
     let _ = window.emit("import-progress", serde_json::json!({
         "progress": 100,
         "finished": true,
-        "status": format!("Импорт завершён! Добавлено {} записей", total_records)
+        "status": format!("Импорт завершён! {} записей", total_records)
     }));
 
-    let _ = conn.execute("DELETE FROM aggregates", []);
-
-    log_to_file("IMPORT: completed");
+    log_to_file(&format!("IMPORT: completed. Files: {}, Records: {}, Outliers removed: {}", 
+        files_processed, total_records, total_filtered));
 
     Ok(serde_json::json!({
         "status": "completed",
         "files_processed": files_processed,
         "records_count": total_records,
+        "outliers_removed": total_filtered,
     }))
 }
+

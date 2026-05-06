@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { useStore } from "./store";
 import {
   importFiles as importFilesApi,
@@ -10,7 +11,6 @@ import {
 import SeaLevelUPlot from "./components/SeaLevelUPlot";
 
 const FREQUENCIES = [
-  // { value: "second", label: "Секунда" },
   { value: "10min", label: "10 минут" },
   { value: "hour", label: "Час" },
   { value: "day", label: "День" },
@@ -47,7 +47,27 @@ function App() {
     setError,
     showFilesModal,
     setShowFilesModal,
+    importFilterEnabled,
+    setImportFilterEnabled,
   } = useStore();
+
+  // Слушатель событий импорта
+  useEffect(() => {
+    const unlisten = listen<{ progress: number; status: string; finished?: boolean }>(
+      "import-progress",
+      (event) => {
+        setImportProgress(event.payload.progress);
+        setImportStatus(event.payload.status || "");
+        if (event.payload.finished) {
+          setIsImporting(false);
+        }
+      }
+    );
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
 
   const [calcTime, setCalcTime] = useState(0);
 
@@ -88,46 +108,32 @@ function App() {
         return;
       }
 
-      setIsImporting(true);
-      setImportProgress(0);
-      setImportStatus("Открытие диалога...");
-
       selected = await dialogLib.open({
         multiple: true,
         filters: [{ name: "Data Files", extensions: ["dat"] }],
       });
 
       if (!selected) {
-        setIsImporting(false);
         return;
       }
 
       const files = Array.isArray(selected) ? selected : [selected];
       if (files.length === 0) {
-        setIsImporting(false);
         return;
       }
 
-      setImportProgress(20);
-      setImportStatus(`Выбрано файлов: ${files.length}`);
+      setIsImporting(true);
+      setImportProgress(0);
+      setImportStatus(`Выбрано файлов: ${files.length}${importFilterEnabled ? " (с фильтрацией)" : ""}`);
 
-      const result = await importFilesApi(files);
+      await importFilesApi(files, importFilterEnabled);
 
-      if (result.files_processed > 0) {
-        const log = await getImportLog();
-        setImportFiles(log);
+      // Обновляем данные после завершения импорта
+      const log = await getImportLog();
+      setImportFiles(log);
+      const range = await getDateRange();
+      setDateRange(range);
 
-        const range = await getDateRange();
-        setDateRange(range);
-
-        setImportStatus(`Готово! Записей: ${result.records_count}`);
-      }
-
-      setTimeout(() => {
-        setIsImporting(false);
-        setImportProgress(0);
-        setImportStatus("");
-      }, 1500);
     } catch (e: any) {
       setError("Ошибка импорта: " + (e?.message || String(e)));
       setIsImporting(false);
@@ -249,25 +255,51 @@ function App() {
               Файлы ({importFiles.length})
             </button>
           </div>
-          <button
-            className="btn btn-primary  btn-offset2"
-            onClick={handleImport}
-            disabled={isImporting}
-          >
-            {isImporting ? "Загрузка..." : "Загрузить файлы"}
-          </button>
+          
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <button
+              className="btn btn-primary"
+              onClick={handleImport}
+              disabled={isImporting}
+            >
+              {isImporting ? "Загрузка..." : "Загрузить"}
+            </button>
 
-          {isImporting && (
-            <div className="progress-section">
-              <div className="progress-bar">
-                <div
-                  className="progress-fill"
-                  style={{ width: `${importProgress}%` }}
-                />
-              </div>
-              <div className="progress-text">{importStatus}</div>
-            </div>
-          )}
+            {/* Переключатель фильтра - квадратная кнопка */}
+            <button
+              className={`filter-toggle ${importFilterEnabled ? 'active' : ''}`}
+              onClick={() => setImportFilterEnabled(!importFilterEnabled)}
+              disabled={isImporting}
+              title={importFilterEnabled ? "Фильтрация выбросов включена" : "Фильтрация выбросов выключена"}
+              style={{
+                width: "36px",
+                height: "36px",
+                minWidth: "36px",
+                padding: "6px",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: "4px",
+                border: importFilterEnabled ? "2px solid #17a2b8" : "2px solid #6c757d",
+                background: importFilterEnabled ? "#e7f5ff" : "#f8f9fa",
+                cursor: "pointer",
+                transition: "all 0.2s",
+              }}
+            >
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke={importFilterEnabled ? "#17a2b8" : "#6c757d"}
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         <div className="control-group">
@@ -288,7 +320,6 @@ function App() {
         </div>
 
         <div className="control-group">
-          {/*<div className="control-group">*/}
           <label>Быстрый период:</label>
           <div style={{ display: "flex", gap: "6px" }}>
             <button className="btn-period" onClick={() => setQuickPeriod(30)}>

@@ -9,19 +9,24 @@ async function httpFetch(path: string, options?: RequestInit) {
   return fetch(`${BASE_URL}${path}`, options)
 }
 
-export async function importFiles(files: string[]): Promise<{ status: string; files_processed: number; records_count: number }> {
+export async function importFiles(
+  files: string[],
+  filterOutliers: boolean = false,
+  halfWindow: number = 5,
+  k: number = 3.0
+): Promise<{ status: string; files_processed: number; records_count: number; outliers_removed: number }> {
   if (isDev) {
     const response = await httpFetch('/import', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ files }),
+      body: JSON.stringify({ files, filter_outliers: filterOutliers, half_window: halfWindow, k }),
     })
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     return response.json()
   }
   
   try {
-    return await invoke('import_files', { files })
+    return await invoke('import_files', { files, filterOutliers, halfWindow, k })
   } catch (e) {
     console.error('importFiles error:', e)
     throw e
@@ -116,3 +121,4 @@ export async function exportFullData(
     throw e
   }
 }
+

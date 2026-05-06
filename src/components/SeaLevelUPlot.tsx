@@ -265,7 +265,7 @@ export default function SeaLevelUPlot({
           →
         </button>
         <button onClick={resetZoom} style={{ padding: "4px 10px" }}>
-          Сброс
+          Все
         </button>
       </div>
       <div ref={chartRef} style={{ width: "100%", minHeight: height }} />
