@@ -134,3 +134,27 @@ export async function exportFullData(
   }
 }
 
+export async function exportMonthData(
+  year: number,
+  month: number
+): Promise<string> {
+  try {
+    return await invoke('export_month_data', {
+      year,
+      month,
+    })
+  } catch (e) {
+    console.error('exportMonthData error:', e)
+    throw e
+  }
+}
+
+export async function getAvailableYears(): Promise<number[]> {
+  try {
+    return await invoke('get_available_years')
+  } catch (e) {
+    console.error('getAvailableYears error:', e)
+    return []
+  }
+}
+

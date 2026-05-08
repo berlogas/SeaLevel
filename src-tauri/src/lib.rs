@@ -1,6 +1,6 @@
 mod backend;
 
-use backend::{aggregate, create_state_from_path, export_full_data, get_date_range, get_import_log, import_files, init_db};
+use backend::{aggregate, create_state_from_path, export_full_data, export_month_data, get_available_years, get_date_range, get_import_log, import_files, init_db};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
@@ -56,6 +56,8 @@ pub fn run() {
             import_files,
             aggregate,
             export_full_data,
+            export_month_data,
+            get_available_years,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

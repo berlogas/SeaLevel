@@ -91,7 +91,6 @@ fn format_datetime(ts_ms: i64, freq: &str) -> String {
     }
 }
 
-// ==================== GAP LOGIC (20 минут) ====================
 fn add_gap_points(data: &[DataPoint], interval_ms: i64, freq: &str) -> Vec<DataPoint> {
     if data.is_empty() {
         log_to_file("add_gap_points: empty data");
@@ -99,14 +98,14 @@ fn add_gap_points(data: &[DataPoint], interval_ms: i64, freq: &str) -> Vec<DataP
     }
 
     let gap_threshold = match freq {
-        "second" => 10_000i64,        // разрыв линии при пропуске > 10 секунд
-        "10min" => 20 * 60_000i64,     // разрыв линии при пропуске > 20 минут
+        "second" => 10_000i64,
+        "10min" => 20 * 60_000i64,
         _       => (interval_ms as f64 * 1.5) as i64,
     };
 
     let max_gap_to_fill = match freq {
-        "second" => 60_000i64,         // до 1 минуты - вставляем null для разрыва линии
-        "10min" => 3 * 24 * 60 * 60_000i64,     // до 3 дней - вставляем null для разрыва линии
+        "second" => 60_000i64,
+        "10min" => 3 * 24 * 60 * 60_000i64,
         _       => interval_ms * 2,
     };
 
@@ -114,19 +113,16 @@ fn add_gap_points(data: &[DataPoint], interval_ms: i64, freq: &str) -> Vec<DataP
         "add_gap_points START: {} raw points | freq={} | gap_threshold={} ms ({:.1}h) | max_fill={} ms ({:.1}h)",
         data.len(), freq, gap_threshold, gap_threshold as f64 / 3600000.0, max_gap_to_fill, max_gap_to_fill as f64 / 3600000.0
     ));
-
     log_to_file(&format!("  First point: {} | Last point: {}", data[0].timestamp, data[data.len()-1].timestamp));
 
     let mut result = Vec::with_capacity(data.len() * 2);
     let mut expected_ts = data[0].timestamp;
-
     let mut p = data[0].clone();
     p.datetime = format_datetime(p.timestamp, freq);
     result.push(p);
 
     for current in &data[1..] {
         let diff = current.timestamp - expected_ts;
-
         if diff > gap_threshold {
             if diff <= max_gap_to_fill {
                 let steps = ((diff as f64) / (interval_ms as f64)).ceil() as i64 - 1;
@@ -134,7 +130,6 @@ fn add_gap_points(data: &[DataPoint], interval_ms: i64, freq: &str) -> Vec<DataP
                     "GAP → diff={} ms ({:.1} intervals) → inserting {} null points",
                     diff, diff as f64 / interval_ms as f64, steps
                 ));
-
                 for i in 1..=steps {
                     let gap_ts = expected_ts + i * interval_ms;
                     result.push(DataPoint {
@@ -163,11 +158,9 @@ fn add_gap_points(data: &[DataPoint], interval_ms: i64, freq: &str) -> Vec<DataP
         } else if diff > interval_ms {
             log_to_file(&format!("Small gap ignored: {} ms", diff));
         }
-
         let mut p = current.clone();
         p.datetime = format_datetime(p.timestamp, freq);
         result.push(p);
-
         expected_ts = current.timestamp;
     }
 
@@ -178,7 +171,6 @@ fn add_gap_points(data: &[DataPoint], interval_ms: i64, freq: &str) -> Vec<DataP
     let null_count = result.iter().filter(|p| p.mean.is_none()).count();
     let last_ts = result.last().map_or(0, |p| p.timestamp);
     let last_real = data.last().map_or(0, |p| p.timestamp);
-
     log_to_file(&format!(
         "add_gap_points FINISHED: {} total points ({} nulls inserted)",
         result.len(), null_count
@@ -186,7 +178,6 @@ fn add_gap_points(data: &[DataPoint], interval_ms: i64, freq: &str) -> Vec<DataP
     log_to_file(&format!("  Last point in result: {} | Last REAL point: {} | diff={} ms",
         last_ts, last_real, last_ts - last_real
     ));
-
     result
 }
 
@@ -202,9 +193,9 @@ fn get_group_expr(freq: &str) -> String {
         "year"  => "epoch_ms(date_trunc('year', EPOCH_MS(timestamp_ms)))".to_string(),
         "decade" =>
             "epoch_ms(date_trunc('month', EPOCH_MS(timestamp_ms))) +
-             (CASE WHEN EXTRACT(DAY FROM EPOCH_MS(timestamp_ms)) <= 10 THEN 0
-                   WHEN EXTRACT(DAY FROM EPOCH_MS(timestamp_ms)) <= 20 THEN 864000000
-                   ELSE 1728000000 END)".to_string(),
+            (CASE WHEN EXTRACT(DAY FROM EPOCH_MS(timestamp_ms)) <= 10 THEN 0
+            WHEN EXTRACT(DAY FROM EPOCH_MS(timestamp_ms)) <= 20 THEN 864000000
+            ELSE 1728000000 END)".to_string(),
         _ => "epoch_ms(date_trunc('day', EPOCH_MS(timestamp_ms)))".to_string(),
     }
 }
@@ -242,7 +233,6 @@ pub fn export_full_data(
     let conn = open_db(&state)?;
     let start_ms = parse_date_to_ms(&start_date)?;
     let end_ms = parse_date_to_ms(&end_date)? + 86_400_000;
-
     let group_expr = get_group_expr(&freq);
     let interval_ms = get_interval_ms(&freq);
 
@@ -254,7 +244,6 @@ pub fn export_full_data(
          GROUP BY 1 ORDER BY 1",
         group_expr, start_ms, end_ms
     );
-
     log_to_file(&format!("EXPORT_FULL freq={}, query starts with: {}", freq, &query[..std::cmp::min(280, query.len())]));
 
     let mut stmt = match conn.prepare(&query) {
@@ -279,7 +268,6 @@ pub fn export_full_data(
         .collect();
 
     log_to_file(&format!("EXPORT_FULL SUCCESS: {} points for freq={}", rows.len(), freq));
-
     let with_gaps = add_gap_points(&rows, interval_ms, &freq);
 
     Ok(AggregateResponse {
@@ -310,8 +298,6 @@ fn chrono_from_ms(ms: i64) -> String {
         .to_string()
 }
 
-// ==================== КОМАНДЫ ====================
-
 #[tauri::command]
 pub fn aggregate(
     start_date: String,
@@ -322,7 +308,6 @@ pub fn aggregate(
     let conn = open_db(&state)?;
     let start_ms = parse_date_to_ms(&start_date)?;
     let end_ms = parse_date_to_ms(&end_date)? + 86_400_000;
-
     let group_expr = get_group_expr(&freq);
     let interval_ms = get_interval_ms(&freq);
 
@@ -334,7 +319,6 @@ pub fn aggregate(
          GROUP BY 1 ORDER BY 1",
         group_expr, start_ms, end_ms
     );
-
     log_to_file(&format!("AGGREGATE freq={}, query starts with: {}", freq, &query[..std::cmp::min(280, query.len())]));
 
     let mut stmt = match conn.prepare(&query) {
@@ -359,15 +343,14 @@ pub fn aggregate(
         .collect();
 
     log_to_file(&format!("AGGREGATE SUCCESS: {} points for freq={}", rows.len(), freq));
-
     let with_gaps = add_gap_points(&rows, interval_ms, &freq);
     let nulls_before = with_gaps.iter().filter(|p| p.mean.is_none()).count();
-    
-    // Для часов и более крупных агрегаций не downsampling (мало точек)
+
     let max_points = match freq.as_str() {
-        "second" | "10min" => MAX_CHART_POINTS,  // Много данных - downsampling нужен
-        _ => with_gaps.len(),                    // Мало данных - без downsampling
+        "second" | "10min" => MAX_CHART_POINTS,
+        _ => with_gaps.len(),
     };
+
     let final_data = downsample_points(with_gaps.clone(), max_points);
     let nulls_after = final_data.iter().filter(|p| p.mean.is_none()).count();
     log_to_file(&format!("DOWNSAMPLE: {} -> {} points (nulls: {} -> {})", with_gaps.len(), final_data.len(), nulls_before, nulls_after));
@@ -387,14 +370,11 @@ pub fn aggregate(
 pub fn init_db(state: State<AppState>) -> Result<(), String> {
     log_to_file("INIT_DB: Starting...");
     let conn = open_db(&state)?;
-
     conn.execute_batch(r#"
         CREATE TABLE IF NOT EXISTS sea_readings (timestamp_ms BIGINT, level DOUBLE, source_file VARCHAR);
         CREATE INDEX IF NOT EXISTS idx_ts ON sea_readings(timestamp_ms);
-
         CREATE TABLE IF NOT EXISTS import_log (filename VARCHAR UNIQUE, status VARCHAR, records_count BIGINT, error_msg VARCHAR, imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
     "#).map_err(|e: DbError| e.to_string())?;
-
     log_to_file("Tables initialized OK");
     Ok(())
 }
@@ -402,7 +382,6 @@ pub fn init_db(state: State<AppState>) -> Result<(), String> {
 #[tauri::command]
 pub fn get_date_range(state: State<AppState>) -> Result<DateRange, String> {
     let conn = open_db(&state)?;
-
     let mut stmt = conn.prepare(
         "SELECT MIN(timestamp_ms), MAX(timestamp_ms) FROM sea_readings WHERE timestamp_ms > ?"
     ).map_err(|e: DbError| e.to_string())?;
@@ -428,7 +407,6 @@ pub fn get_date_range(state: State<AppState>) -> Result<DateRange, String> {
 #[tauri::command]
 pub fn get_import_log(state: State<AppState>) -> Result<Vec<ImportFile>, String> {
     let conn = open_db(&state)?;
-
     let mut stmt = conn.prepare(
         "SELECT filename, status, records_count, imported_at FROM import_log ORDER BY imported_at DESC"
     ).map_err(|e: DbError| e.to_string())?;
@@ -454,7 +432,7 @@ pub fn import_files(
     state: State<AppState>,
     window: Window,
 ) -> Result<serde_json::Value, String> {
-    let _iqr_multiplier = k; // Множитель IQR для фильтра
+    let _iqr_multiplier = k;
     log_to_file(&format!("=== IMPORT START: {} files, filter={}, k={} ===", 
         files.len(), filter_outliers, k));
     let conn = open_db(&state)?;
@@ -482,7 +460,6 @@ pub fn import_files(
         let safe_path = file_path.replace("'", "''");
         let safe_name = filename.replace("'", "''");
 
-        // Шаг 1: Читаем файл во временную таблицу
         let read_query = format!(
             "CREATE TABLE IF NOT EXISTS import_temp AS
              SELECT CAST(epoch_ms(strptime(col0 || ' ' || col1, '%d.%m.%Y %H:%M:%S.%f')) AS BIGINT) as timestamp_ms,
@@ -505,7 +482,6 @@ pub fn import_files(
             continue;
         }
 
-        // Шаг 2: Определяем диапазон дат файла
         let (min_ts, max_ts): (i64, i64) = {
             let result: Result<(Option<i64>, Option<i64>), _> = conn.query_row(
                 "SELECT MIN(timestamp_ms), MAX(timestamp_ms) FROM import_temp",
@@ -516,14 +492,12 @@ pub fn import_files(
             match result {
                 Ok((Some(min), Some(max))) => (min, max),
                 _ => {
-                    // Пустой файл
                     conn.execute("DROP TABLE IF EXISTS import_temp", []).ok();
                     continue;
                 }
             }
         };
 
-        // Шаг 3: Удаляем старые данные в этом диапазоне
         let deleted_old: i64 = conn.query_row(
             "SELECT COUNT(*) FROM sea_readings WHERE timestamp_ms BETWEEN ? AND ?",
             params![min_ts, max_ts],
@@ -540,16 +514,13 @@ pub fn import_files(
                 filename, deleted_old));
         }
 
-        // Запоминаем количество записей в файле ДО фильтрации
         let raw_count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM import_temp",
             [],
             |row: &Row| row.get(0),
         ).unwrap_or(0);
         
-        // Шаг 4: Фильтрация выбросов
         if filter_outliers {
-            // Проверим диапазон значений в файле
             let (min_level, max_level, avg_level, q1, q3): (f64, f64, f64, f64, f64) = conn.query_row(
                 "SELECT MIN(level), MAX(level), AVG(level), 
                         QUANTILE_CONT(level, 0.25), QUANTILE_CONT(level, 0.75) 
@@ -561,7 +532,6 @@ pub fn import_files(
             log_to_file(&format!("IMPORT {}: levels min={:.2}, max={:.2}, avg={:.2}, Q1={:.2}, Q3={:.2}", 
                 filename, min_level, max_level, avg_level, q1, q3));
 
-            // IQR-based фильтр
             let iqr = q3 - q1;
             let lower_bound = q1 - 3.0 * iqr;
             let upper_bound = q3 + 3.0 * iqr;
@@ -569,7 +539,6 @@ pub fn import_files(
             log_to_file(&format!("IMPORT {}: IQR filter bounds: [{:.2}, {:.2}], IQR={:.2}", 
                 filename, lower_bound, upper_bound, iqr));
 
-            // Удаляем выбросы по IQR
             conn.execute(
                 "DELETE FROM import_temp WHERE level < ? OR level > ?",
                 params![lower_bound, upper_bound],
@@ -582,7 +551,6 @@ pub fn import_files(
             log_to_file(&format!("IMPORT {}: IQR filter removed {} outliers", 
                 filename, removed_by_iqr));
 
-            // Вставляем отфильтрованные данные
             let insert_query = format!(
                 "INSERT INTO sea_readings (timestamp_ms, level, source_file) 
                  SELECT timestamp_ms, level, '{}' FROM import_temp",
@@ -627,7 +595,6 @@ pub fn import_files(
         
         let _ = conn.execute("DROP TABLE IF EXISTS import_temp", []).ok();
 
-        // Подсчитываем результаты
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM sea_readings WHERE source_file = ?",
             params![&filename],
@@ -637,7 +604,6 @@ pub fn import_files(
         files_processed += 1;
         total_records += count;
 
-        // Считаем отфильтрованные выбросы
         if filter_outliers {
             let outliers = raw_count - count;
             total_filtered += outliers;
@@ -671,8 +637,6 @@ pub fn import_files(
         }));
     }
 
-    let _ = conn.execute("DELETE FROM aggregates", []);
-
     let _ = window.emit("import-progress", serde_json::json!({
         "progress": 100,
         "finished": true,
@@ -690,3 +654,108 @@ pub fn import_files(
     }))
 }
 
+#[tauri::command]
+pub fn export_month_data(
+    year: i32,
+    month: u32,
+    state: State<AppState>,
+    window: Window,
+) -> Result<String, String> {
+    let conn = open_db(&state)?;
+    
+    let start_dt = chrono::NaiveDate::from_ymd_opt(year, month as u32, 1)
+        .ok_or("Invalid month/year")?
+        .and_hms_opt(0, 0, 0)
+        .ok_or("Invalid date")?;
+    
+    let start_ms = start_dt.and_utc().timestamp_millis();
+    
+    let next_month = if month == 12 {
+        chrono::NaiveDate::from_ymd_opt(year + 1, 1, 1)
+    } else {
+        chrono::NaiveDate::from_ymd_opt(year, month + 1, 1)
+    }.ok_or("Invalid next month").unwrap();
+    
+    let end_ms = next_month.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp_millis();
+    
+    log_to_file(&format!("EXPORT_MONTH: {}-{:02}, range: {} to {}", year, month, start_ms, end_ms));
+    
+    let query = format!(
+        "SELECT timestamp_ms, level FROM sea_readings 
+         WHERE timestamp_ms >= {} AND timestamp_ms < {}
+         ORDER BY timestamp_ms",
+        start_ms, end_ms
+    );
+    
+    let mut stmt = conn.prepare(&query).map_err(|e| e.to_string())?;
+    
+    let rows: Vec<(i64, f64)> = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+    
+    log_to_file(&format!("EXPORT_MONTH: Found {} records", rows.len()));
+    
+    if rows.is_empty() {
+        return Err("No data found for this month".to_string());
+    }
+    
+    let filename = format!("{}_{:02}.dat", year, month);
+    let mut content = String::with_capacity(rows.len() * 25);
+    let total_rows = rows.len();
+    
+    for (i, (timestamp_ms, level)) in rows.into_iter().enumerate() {
+        if let Some(dt) = chrono::DateTime::from_timestamp(timestamp_ms / 1000, 0) {
+            let ms = (timestamp_ms % 1000) as u32;
+            let line = format!("{}.{:03} {:.6}\n", dt.format("%d.%m.%Y %H:%M:%S"), ms, level);
+            content.push_str(&line);
+        }
+
+        if (total_rows > 1_000_000) && (i > 0) && (i % 1_000_000 == 0) {
+            let progress = ((i as f32 / total_rows as f32) * 100.0) as u8;
+            let _ = window.emit("export-progress", serde_json::json!({
+                "progress": progress
+            }));
+        }
+    }
+    
+    let db_path = get_db_path(&state);
+    let default_path = PathBuf::from(".");
+    let app_dir = db_path.parent().unwrap_or(default_path.as_path()).to_path_buf();
+    let file_path = app_dir.join(&filename);
+    
+    let mut file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&file_path)
+        .map_err(|e| format!("Failed to create file: {}", e))?;
+    
+    file.write_all(content.as_bytes())
+        .map_err(|e| format!("Failed to write file: {}", e))?;
+    
+    log_to_file(&format!("EXPORT_MONTH: Saved {} bytes to {:?}", content.len(), file_path));
+    
+    Ok(filename)
+}
+
+#[tauri::command]
+pub fn get_available_years(state: State<AppState>) -> Result<Vec<i32>, String> {
+    let conn = open_db(&state)?;
+    
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT EXTRACT(YEAR FROM TO_TIMESTAMP(timestamp_ms / 1000))::INTEGER as year
+         FROM sea_readings
+         WHERE timestamp_ms > ?
+         ORDER BY year"
+    ).map_err(|e| e.to_string())?;
+    
+    let years = stmt
+        .query_map([MIN_VALID_TS], |row| row.get(0))
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+    
+    Ok(years)
+}

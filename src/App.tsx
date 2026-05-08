@@ -5,6 +5,8 @@ import {
   importFiles as importFilesApi,
   aggregate,
   exportFullData,
+  exportMonthData,
+  getAvailableYears,
   getImportLog,
   getDateRange,
 } from "./api";
@@ -54,6 +56,10 @@ function App() {
   const [isLoadingOverlay, setIsLoadingOverlay] = useState(false);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
   const [exportFilename, setExportFilename] = useState<string | null>(null);
+  const [showMonthExportModal, setShowMonthExportModal] = useState(false);
+  const [selectedYear, setSelectedYear] = useState<number | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState<number>(1);
+  const [availableYears, setAvailableYears] = useState<number[]>([]);
 
   // Слушатель событий импорта
   useEffect(() => {
@@ -278,6 +284,43 @@ function App() {
     }
   };
 
+  const handleMonthExport = async () => {
+    if (!selectedYear) {
+      setError("Выберите год");
+      return;
+    }
+
+    try {
+      setIsLoadingOverlay(true);
+      const filename = await exportMonthData(selectedYear, selectedMonth);
+      
+      setExportFilename(filename);
+      setExportMessage("Файл месяца сохранён!");
+      setTimeout(() => {
+        setExportMessage(null);
+        setExportFilename(null);
+      }, 5000);
+      setShowMonthExportModal(false);
+    } catch (e: any) {
+      setError(e?.message || "Ошибка экспорта месяца");
+    } finally {
+      setIsLoadingOverlay(false);
+    }
+  };
+
+  const openMonthExportModal = async () => {
+    try {
+      const years = await getAvailableYears();
+      setAvailableYears(years);
+      if (years.length > 0) {
+        setSelectedYear(years[0]);
+      }
+      setShowMonthExportModal(true);
+    } catch (e) {
+      setError("Не удалось загрузить список лет");
+    }
+  };
+
   // Быстрый зум
   const setQuickPeriod = (days: number) => {
     if (!dateRange.end) return;
@@ -330,16 +373,18 @@ function App() {
               {isImporting ? "Загрузка..." : "Загрузить"}
             </button>
 
-            {/* Чекбокс IQR фильтра */}
-            <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: isUiLocked ? "not-allowed" : "pointer" }}>
-              <input
-                type="checkbox"
-                checked={useIqrFilter}
-                onChange={(e) => setUseIqrFilter(e.target.checked)}
-                disabled={isUiLocked}
-              />
-              <span style={{ fontSize: "13px" }}>ФИЛЬТР</span>
-            </label>
+            {/* Кнопка IQR фильтра — воронка */}
+            <button 
+              className={`btn btn-funnel ${useIqrFilter ? "active" : ""}`}
+              onClick={() => setUseIqrFilter(!useIqrFilter)}
+              disabled={isUiLocked}
+              title={useIqrFilter ? "Фильтр IQR включён" : "Фильтр IQR выключён"}
+              aria-label="Переключить фильтр IQR"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+              </svg>
+            </button>
           </div>
         </div>
 
@@ -459,6 +504,41 @@ function App() {
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
           </button>
+          </div>
+
+        <div className="control-group">
+          <button
+            className="btn btn-info  btn-offset"
+            style={{
+              height: "36px",
+              minHeight: "36px",
+              padding: "4px 12px",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              lineHeight: "1",
+            }}
+            onClick={openMonthExportModal}
+            disabled={isUiLocked}
+            aria-label="Экспорт месяца"
+            title="Экспорт месяца в формате YYYY_MM.dat"
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+              <line x1="16" y1="2" x2="16" y2="6" />
+              <line x1="8" y1="2" x2="8" y2="6" />
+              <line x1="3" y1="10" x2="21" y2="10" />
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -540,6 +620,78 @@ function App() {
                   </tbody>
                 </table>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showMonthExportModal && (
+        <div className="modal-overlay" onClick={() => setShowMonthExportModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "400px" }}>
+            <div className="modal-header">
+              <h3>Экспорт месяца</h3>
+              <button onClick={() => setShowMonthExportModal(false)}>×</button>
+            </div>
+            <div className="modal-body">
+              <div className="control-group">
+                <label>Год:</label>
+                <select
+                  value={selectedYear || ""}
+                  onChange={(e) => setSelectedYear(Number(e.target.value))}
+                  disabled={!availableYears.length}
+                >
+                  {availableYears.length === 0 ? (
+                    <option>Нет данных</option>
+                  ) : (
+                    availableYears.map((year) => (
+                      <option key={year} value={year}>{year}</option>
+                    ))
+                  )}
+                </select>
+              </div>
+
+              <div className="control-group">
+                <label>Месяц:</label>
+                <select
+                  value={selectedMonth}
+                  onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                >
+                  {Array.from({ length: 12 }, (_, i) => i + 1).map((month) => (
+                    <option key={month} value={month}>
+                      {month === 1 && "Январь"}
+                      {month === 2 && "Февраль"}
+                      {month === 3 && "Март"}
+                      {month === 4 && "Апрель"}
+                      {month === 5 && "Май"}
+                      {month === 6 && "Июнь"}
+                      {month === 7 && "Июль"}
+                      {month === 8 && "Август"}
+                      {month === 9 && "Сентябрь"}
+                      {month === 10 && "Октябрь"}
+                      {month === 11 && "Ноябрь"}
+                      {month === 12 && "Декабрь"}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ display: "flex", gap: "10px", marginTop: "20px" }}>
+                <button
+                  className="btn btn-primary"
+                  onClick={handleMonthExport}
+                  disabled={!selectedYear || isUiLocked}
+                  style={{ flex: 1 }}
+                >
+                  Экспорт
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => setShowMonthExportModal(false)}
+                  style={{ flex: 1 }}
+                >
+                  Отмена
+                </button>
+              </div>
             </div>
           </div>
         </div>
