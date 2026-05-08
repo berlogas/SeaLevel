@@ -561,7 +561,7 @@ pub fn import_files(
             log_to_file(&format!("IMPORT {}: levels min={:.2}, max={:.2}, avg={:.2}, Q1={:.2}, Q3={:.2}", 
                 filename, min_level, max_level, avg_level, q1, q3));
 
-            // IQR-based глобальный фильтр: удаляем всё за пределами Q1-3*IQR .. Q3+3*IQR
+            // IQR-based фильтр
             let iqr = q3 - q1;
             let lower_bound = q1 - 3.0 * iqr;
             let upper_bound = q3 + 3.0 * iqr;

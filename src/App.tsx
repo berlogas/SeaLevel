@@ -322,7 +322,7 @@ function App() {
                 onChange={(e) => setUseIqrFilter(e.target.checked)}
                 disabled={isUiLocked}
               />
-              <span style={{ fontSize: "13px" }}>фильтр</span>
+              <span style={{ fontSize: "13px" }}>ФИЛЬТР</span>
             </label>
           </div>
         </div>
