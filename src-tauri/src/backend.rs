@@ -410,11 +410,18 @@ pub fn get_date_range(state: State<AppState>) -> Result<DateRange, String> {
     let result: Option<(i64, i64)> = stmt.query_row([&MIN_VALID_TS], |row| Ok((row.get(0)?, row.get(1)?))).ok();
 
     match result {
-        Some((min, max)) => Ok(DateRange {
-            start: Some(chrono_from_ms(min)),
-            end: Some(chrono_from_ms(max)),
-        }),
-        None => Ok(DateRange { start: None, end: None }),
+        Some((min, max)) => {
+            let date_range = DateRange {
+                start: Some(chrono_from_ms(min)),
+                end: Some(chrono_from_ms(max)),
+            };
+            log_to_file(&format!("GET_DATE_RANGE: start={}, end={}", date_range.start.as_ref().unwrap_or(&"—".to_string()), date_range.end.as_ref().unwrap_or(&"—".to_string())));
+            Ok(date_range)
+        },
+        None => {
+            log_to_file("GET_DATE_RANGE: No data found");
+            Ok(DateRange { start: None, end: None })
+        }
     }
 }
 
@@ -442,14 +449,14 @@ pub fn get_import_log(state: State<AppState>) -> Result<Vec<ImportFile>, String>
 pub fn import_files(
     files: Vec<String>,
     filter_outliers: bool,
-    half_window: usize,
+    _half_window: usize,
     k: f64,
     state: State<AppState>,
     window: Window,
 ) -> Result<serde_json::Value, String> {
-    let iqr_multiplier = 3.0; // Множитель IQR для глобального фильтра
-    log_to_file(&format!("=== IMPORT START: {} files, filter={}, half_window={}, k={}, iqr_mult={} ===", 
-        files.len(), filter_outliers, half_window, k, iqr_multiplier));
+    let _iqr_multiplier = k; // Множитель IQR для фильтра
+    log_to_file(&format!("=== IMPORT START: {} files, filter={}, k={} ===", 
+        files.len(), filter_outliers, k));
     let conn = open_db(&state)?;
     
     let total_files = files.len();
@@ -637,7 +644,7 @@ pub fn import_files(
             log_to_file(&format!("IMPORT FILE {}: {} records -> {} (outliers: {})", 
                 filename, raw_count, count, outliers));
         } else {
-            log_to_file(&format!("IMPORT FILE {}: {} records", filename, raw_count));
+            log_to_file(&format!("IMPORT FILE {}: {} records", filename, count));
         }
         
         let _ = conn.execute(

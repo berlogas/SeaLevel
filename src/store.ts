@@ -60,6 +60,16 @@ interface AppState {
   // Фильтр при импорте
   importFilterEnabled: boolean
   setImportFilterEnabled: (enabled: boolean) => void
+  
+  // Фильтр Калмана
+  kalmanFilterEnabled: boolean
+  setKalmanFilterEnabled: (enabled: boolean) => void
+  
+  kalmanProcessNoise: number
+  setKalmanProcessNoise: (noise: number) => void
+  
+  kalmanMeasurementNoise: number
+  setKalmanMeasurementNoise: (noise: number) => void
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -105,4 +115,14 @@ export const useStore = create<AppState>((set) => ({
   // Фильтр при импорте
   importFilterEnabled: false,
   setImportFilterEnabled: (enabled) => set({ importFilterEnabled: enabled }),
+  
+  // Фильтр Калмана
+  kalmanFilterEnabled: false,
+  setKalmanFilterEnabled: (enabled) => set({ kalmanFilterEnabled: enabled }),
+  
+  kalmanProcessNoise: 0.01,
+  setKalmanProcessNoise: (noise) => set({ kalmanProcessNoise: noise }),
+  
+  kalmanMeasurementNoise: 1.0,
+  setKalmanMeasurementNoise: (noise) => set({ kalmanMeasurementNoise: noise }),
 }))

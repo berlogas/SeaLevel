@@ -47,9 +47,11 @@ function App() {
     setError,
     showFilesModal,
     setShowFilesModal,
-    importFilterEnabled,
-    setImportFilterEnabled,
   } = useStore();
+
+  const [useIqrFilter, setUseIqrFilter] = useState(false);
+  const [isUiLocked, setIsUiLocked] = useState(false);
+  const [isLoadingOverlay, setIsLoadingOverlay] = useState(false);
 
   // Слушатель событий импорта
   useEffect(() => {
@@ -97,6 +99,39 @@ function App() {
     }
   };
 
+  // Обновляет диапазон дат после импорта (выравнивание на начало/конец периода)
+  const updateDateRangeAfterImport = async () => {
+    try {
+      setIsLoadingOverlay(true);
+      
+      const log = await getImportLog();
+      setImportFiles(log);
+
+      const range = await getDateRange();
+      setDateRange(range);
+
+      // Выравниваем на начало и конец периода (как кнопка "Весь период")
+      if (range.start && range.end) {
+        const [d, m, y] = range.end.split(".");
+        const end = new Date(`${y}-${m}-${d}`);
+        let start = new Date(end);
+
+        if (range.start) {
+          const [d, m, y] = range.start.split(".");
+          start = new Date(`${y}-${m}-${d}`);
+        }
+
+        setStartDate(start.toISOString().split("T")[0]);
+        setEndDate(end.toISOString().split("T")[0]);
+        setSelectedPeriod(0);
+      }
+    } catch (e) {
+      console.error("Failed to update date range:", e);
+    } finally {
+      setIsLoadingOverlay(false);
+    }
+  };
+
   const handleImport = async () => {
     try {
       let selected: any = null;
@@ -124,20 +159,31 @@ function App() {
       }
 
       setIsImporting(true);
+      setIsUiLocked(true);
+      setIsLoadingOverlay(true);
       setImportProgress(0);
-      setImportStatus(`Выбрано файлов: ${files.length}${importFilterEnabled ? " (с фильтрацией)" : ""}`);
+      const filterText = useIqrFilter ? " (IQR k=3)" : "";
+      setImportStatus(`Выбрано файлов: ${files.length}${filterText}`);
 
-      await importFilesApi(files, importFilterEnabled);
+      try {
+        await importFilesApi(
+          files,
+          500, 3.0,
+          useIqrFilter
+        );
 
-      // Обновляем данные после завершения импорта
-      const log = await getImportLog();
-      setImportFiles(log);
-      const range = await getDateRange();
-      setDateRange(range);
+        await updateDateRangeAfterImport();
+      } finally {
+        setIsImporting(false);
+        setIsUiLocked(false);
+        setIsLoadingOverlay(false);
+      }
 
     } catch (e: any) {
       setError("Ошибка импорта: " + (e?.message || String(e)));
       setIsImporting(false);
+      setIsUiLocked(false);
+      setIsLoadingOverlay(false);
     }
   };
 
@@ -253,6 +299,7 @@ function App() {
             <button
               className="btn-link"
               onClick={() => setShowFilesModal(true)}
+              disabled={isUiLocked}
             >
               Файлы ({importFiles.length})
             </button>
@@ -267,40 +314,16 @@ function App() {
               {isImporting ? "Загрузка..." : "Загрузить"}
             </button>
 
-            {/* Переключатель фильтра - квадратная кнопка */}
-            <button
-              className={`filter-toggle ${importFilterEnabled ? 'active' : ''}`}
-              onClick={() => setImportFilterEnabled(!importFilterEnabled)}
-              disabled={isImporting}
-              title={importFilterEnabled ? "Фильтрация выбросов включена" : "Фильтрация выбросов выключена"}
-              style={{
-                width: "36px",
-                height: "36px",
-                minWidth: "36px",
-                padding: "6px",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                borderRadius: "4px",
-                border: importFilterEnabled ? "2px solid #17a2b8" : "2px solid #6c757d",
-                background: importFilterEnabled ? "#e7f5ff" : "#f8f9fa",
-                cursor: "pointer",
-                transition: "all 0.2s",
-              }}
-            >
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke={importFilterEnabled ? "#17a2b8" : "#6c757d"}
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
-              </svg>
-            </button>
+            {/* Чекбокс IQR фильтра */}
+            <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: isUiLocked ? "not-allowed" : "pointer" }}>
+              <input
+                type="checkbox"
+                checked={useIqrFilter}
+                onChange={(e) => setUseIqrFilter(e.target.checked)}
+                disabled={isUiLocked}
+              />
+              <span style={{ fontSize: "13px" }}>фильтр</span>
+            </label>
           </div>
         </div>
 
@@ -311,12 +334,14 @@ function App() {
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
+              disabled={isUiLocked}
             />
             <span>–</span>
             <input
               type="date"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
+              disabled={isUiLocked}
             />
           </div>
         </div>
@@ -327,6 +352,7 @@ function App() {
             <button 
               className="btn-period" 
               onClick={() => setQuickPeriod(30)}
+              disabled={isUiLocked}
               style={{ backgroundColor: selectedPeriod === 30 ? '#e7f5ff' : undefined }}
             >
               30 дней
@@ -334,6 +360,7 @@ function App() {
             <button 
               className="btn-period" 
               onClick={() => setQuickPeriod(90)}
+              disabled={isUiLocked}
               style={{ backgroundColor: selectedPeriod === 90 ? '#e7f5ff' : undefined }}
             >
               3 месяца
@@ -341,6 +368,7 @@ function App() {
             <button 
               className="btn-period" 
               onClick={() => setQuickPeriod(365)}
+              disabled={isUiLocked}
               style={{ backgroundColor: selectedPeriod === 365 ? '#e7f5ff' : undefined }}
             >
               1 год
@@ -348,6 +376,7 @@ function App() {
             <button 
               className="btn-period" 
               onClick={() => setQuickPeriod(0)}
+              disabled={isUiLocked}
               style={{ backgroundColor: selectedPeriod === 0 ? '#e7f5ff' : undefined }}
             >
               Весь период
@@ -360,6 +389,7 @@ function App() {
           <select
             value={frequency}
             onChange={(e) => setFrequency(e.target.value)}
+            disabled={isUiLocked}
           >
             {FREQUENCIES.map((f) => (
               <option key={f.value} value={f.value}>
@@ -371,19 +401,11 @@ function App() {
 
         <div
           className="control-group"
-
-          // style={{
-          //   marginTop: 8px,
-          //   // display: "flex",
-          //   // justifyContent: "space-between",
-          //   // alignItems: "center",
-          //   // width: "100%",
-          // }}
         >
           <button
             className="btn btn-success  btn-offset"
             onClick={handleCalculate}
-            disabled={isLoading}
+            disabled={isLoading || isUiLocked}
           >
             {isLoading ? "Расчёт..." : "Рассчитать"}
           </button>
@@ -402,7 +424,7 @@ function App() {
               lineHeight: "1",
             }}
             onClick={handleExportFullCSV}
-            disabled={aggregateData.length === 0}
+            disabled={aggregateData.length === 0 || isUiLocked}
             aria-label="Экспорт CSV"
             title="Экспорт CSV (сжатый)"
           >
@@ -421,47 +443,20 @@ function App() {
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
           </button>
-          {/*<button
-            className="btn btn-secondary  btn-offset"
-            style={{
-              height: "36px",
-              minHeight: "36px",
-              padding: "4px 12px",
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              lineHeight: "1",
-            }}
-            onClick={handleExportFullCSV}
-            disabled={isLoading}
-            aria-label="Экспорт полных данных"
-            title="Экспорт полных данных (без сжатия)"
-          >
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="7 10 12 15 17 10" />
-              <line x1="12" y1="15" x2="12" y2="3" />
-              <text x="12" y="11" fontSize="7" textAnchor="middle" fill="currentColor">full</text>
-            </svg>
-          </button>*/}
         </div>
-
-        {/* Кнопки быстрого зума */}
       </div>
 
       {error && (
         <div className="error">
           <button onClick={() => setError(null)}>✕</button>
           {error}
+        </div>
+      )}
+
+      {isLoadingOverlay && (
+        <div className="loading-overlay">
+          <div className="spinner-large" />
+          <p>Пожалуйста, подождите...</p>
         </div>
       )}
 

@@ -11,22 +11,32 @@ async function httpFetch(path: string, options?: RequestInit) {
 
 export async function importFiles(
   files: string[],
-  filterOutliers: boolean = false,
-  halfWindow: number = 100,
-  k: number = 3.0
+  halfWindow: number = 500,
+  k: number = 3.0,  // IQR множитель
+  filterOutliers: boolean = false
 ): Promise<{ status: string; files_processed: number; records_count: number; outliers_removed: number }> {
   if (isDev) {
     const response = await httpFetch('/import', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ files, filter_outliers: filterOutliers, half_window: halfWindow, k }),
+      body: JSON.stringify({ 
+        files, 
+        filter_outliers: filterOutliers,
+        half_window: halfWindow,
+        k,
+      }),
     })
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     return response.json()
   }
   
   try {
-    return await invoke('import_files', { files, filterOutliers, halfWindow, k })
+    return await invoke('import_files', { 
+      files, 
+      filterOutliers,
+      halfWindow,
+      k,
+    })
   } catch (e) {
     console.error('importFiles error:', e)
     throw e
@@ -39,8 +49,8 @@ interface AggregateResult {
 }
 
 export async function aggregate(
-  startDate: string, 
-  endDate: string, 
+  startDate: string,
+  endDate: string,
   frequency: string
 ): Promise<AggregateResult> {
   if (isDev) {
@@ -50,15 +60,17 @@ export async function aggregate(
       body: JSON.stringify({ start_date: startDate, end_date: endDate, frequency }),
     })
     if (!response.ok) throw new Error('Aggregation failed')
-    return response.json()
+    const result = await response.json() as AggregateResult
+    return result
   }
   
   try {
-    return await invoke('aggregate', {
+    const result = await invoke('aggregate', {
       startDate,
       endDate,
       freq: frequency,
-    })
+    }) as AggregateResult
+    return result
   } catch (e) {
     console.error('aggregate error:', e)
     throw e
@@ -71,7 +83,7 @@ export async function getImportLog(): Promise<ImportFile[]> {
     if (!response.ok) throw new Error('Failed to get import log')
     return response.json()
   }
-  
+
   try {
     return await invoke('get_import_log')
   } catch (e) {
