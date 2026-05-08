@@ -52,6 +52,8 @@ function App() {
   const [useIqrFilter, setUseIqrFilter] = useState(false);
   const [isUiLocked, setIsUiLocked] = useState(false);
   const [isLoadingOverlay, setIsLoadingOverlay] = useState(false);
+  const [exportMessage, setExportMessage] = useState<string | null>(null);
+  const [exportFilename, setExportFilename] = useState<string | null>(null);
 
   // Слушатель событий импорта
   useEffect(() => {
@@ -80,6 +82,8 @@ function App() {
 
   const loadInitialData = async () => {
     try {
+      setIsLoadingOverlay(true);
+      
       const log = await getImportLog();
       setImportFiles(log);
 
@@ -96,6 +100,8 @@ function App() {
       }
     } catch (e) {
       console.error("Failed to load initial data:", e);
+    } finally {
+      setIsLoadingOverlay(false);
     }
   };
 
@@ -233,7 +239,9 @@ function App() {
 
   const handleExportFullCSV = async () => {
     try {
-      setIsLoading(true);
+      setIsLoadingOverlay(true);
+      setExportMessage(null);
+      
       const result = await exportFullData(startDate, endDate, frequency);
       const data = result.data;
 
@@ -252,13 +260,21 @@ function App() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `sealevel_${frequency}_full_${startDate}_${endDate}.csv`;
+      const filename = `sealevel_${frequency}_full_${startDate}_${endDate}.csv`;
+      a.download = filename;
       a.click();
       URL.revokeObjectURL(url);
+      
+      setExportFilename(filename);
+      setExportMessage("Файл сохранён!");
+      setTimeout(() => {
+        setExportMessage(null);
+        setExportFilename(null);
+      }, 5000);
     } catch (e: any) {
       setError(e?.message || "Ошибка экспорта");
     } finally {
-      setIsLoading(false);
+      setIsLoadingOverlay(false);
     }
   };
 
@@ -460,6 +476,15 @@ function App() {
         </div>
       )}
 
+      {exportMessage && (
+        <div className="export-success">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+          <span>{exportMessage} <strong>{exportFilename}</strong></span>
+        </div>
+      )}
+
       <div className="chart-container">
         <div className="chart">
           <SeaLevelUPlot
@@ -502,7 +527,6 @@ function App() {
                       <th>Файл</th>
                       <th>Статус</th>
                       <th>Записей</th>
-                      <th>Дата импорта</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -511,11 +535,6 @@ function App() {
                         <td>{f.filename}</td>
                         <td className={f.status}>{f.status}</td>
                         <td>{f.records_count}</td>
-                        <td>
-                          {f.imported_at
-                            ? new Date(f.imported_at).toLocaleString("ru-RU")
-                            : "-"}
-                        </td>
                       </tr>
                     ))}
                   </tbody>
