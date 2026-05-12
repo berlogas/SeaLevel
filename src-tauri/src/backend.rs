@@ -1,10 +1,10 @@
-use duckdb::{Connection, params, Error as DbError, Row};
+use duckdb::{Connection, params, Error as DbError};
 use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use tauri::{State, Window, Emitter};
+use tauri::{State, AppHandle, Emitter};
 
 const MAX_CHART_POINTS: usize = 10000;
 
@@ -67,7 +67,10 @@ fn get_db_path(state: &State<AppState>) -> PathBuf {
 
 fn open_db(state: &State<AppState>) -> Result<Connection, String> {
     let path = get_db_path(state);
-    Connection::open(&path).map_err(|e| e.to_string())
+    let conn = Connection::open(&path).map_err(|e| e.to_string())?;
+    // Оптимизация: увеличиваем число потоков и лимит памяти для импорта
+    conn.execute_batch("PRAGMA threads=4; PRAGMA memory_limit='4GB';").ok();
+    Ok(conn)
 }
 
 pub fn create_state_from_path(app_dir: PathBuf, db_name: &str) -> AppState {
@@ -342,7 +345,11 @@ pub fn aggregate(
         .filter_map(|r| r.ok())
         .collect();
 
-    log_to_file(&format!("AGGREGATE SUCCESS: {} points for freq={}", rows.len(), freq));
+    log_to_file(&format!("AGGREGATE SUCCESS: {} points for freq={} | min={:.2} max={:.2}", 
+        rows.len(), freq, 
+        rows.iter().filter_map(|r| r.min).fold(f64::INFINITY, |a, b| a.min(b)),
+        rows.iter().filter_map(|r| r.max).fold(f64::NEG_INFINITY, |a, b| a.max(b))
+    ));
     let with_gaps = add_gap_points(&rows, interval_ms, &freq);
     let nulls_before = with_gaps.iter().filter(|p| p.mean.is_none()).count();
 
@@ -423,16 +430,26 @@ pub fn get_import_log(state: State<AppState>) -> Result<Vec<ImportFile>, String>
     Ok(rows.flatten().collect())
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportPayload {
+    pub files: Vec<String>,
+    pub filter_outliers: bool,
+    pub half_window: usize,
+    pub k: f64,
+}
+
 #[tauri::command]
 pub fn import_files(
-    files: Vec<String>,
-    filter_outliers: bool,
-    _half_window: usize,
-    k: f64,
+    payload: ImportPayload,
     state: State<AppState>,
-    window: Window,
+    app: AppHandle,
 ) -> Result<serde_json::Value, String> {
-    let _iqr_multiplier = k;
+    let files = payload.files;
+    let filter_outliers = payload.filter_outliers;
+    let _half_window = payload.half_window;
+    let k = payload.k;
+
     log_to_file(&format!("=== IMPORT START: {} files, filter={}, k={} ===", 
         files.len(), filter_outliers, k));
     let conn = open_db(&state)?;
@@ -443,13 +460,21 @@ pub fn import_files(
     let mut files_processed = 0i32;
     let start_time = std::time::Instant::now();
 
+    // Оптимизация 1: при массовом импорте (>1 файл) временно удаляем индекс idx_ts.
+    // Индекс сильно замедляет массовые INSERT, т.к. требует обновления B-tree на каждую запись.
+    let use_bulk_opt = total_files > 1;
+    if use_bulk_opt {
+        log_to_file("IMPORT OPT: dropping index idx_ts for bulk import");
+        conn.execute("DROP INDEX IF EXISTS idx_ts", []).ok();
+    }
+
     for (index, file_path) in files.iter().enumerate() {
         let filename = std::path::PathBuf::from(file_path)
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        let _ = window.emit("import-progress", serde_json::json!({
+        let _ = app.emit("import-progress", serde_json::json!({
             "progress": ((index as f32 / total_files as f32) * 100.0) as u8,
             "current": index + 1,
             "total": total_files,
@@ -460,19 +485,20 @@ pub fn import_files(
         let safe_path = file_path.replace("'", "''");
         let safe_name = filename.replace("'", "''");
 
+        conn.execute("DROP TABLE IF EXISTS import_temp", []).ok();
+
+        // Шаг 1 — загружаем CSV во временную таблицу (auto-commit, вне транзакции)
         let read_query = format!(
-            "CREATE TABLE IF NOT EXISTS import_temp AS
+            "CREATE TABLE import_temp AS
              SELECT CAST(epoch_ms(strptime(col0 || ' ' || col1, '%d.%m.%Y %H:%M:%S.%f')) AS BIGINT) as timestamp_ms,
                     col2::DOUBLE as level
-             FROM read_csv('{}', header=false, sep=' ', auto_detect=false, sample_size=-1,
+             FROM read_csv('{}', header=false, sep=' ', auto_detect=false,
                  columns={{'col0': 'VARCHAR', 'col1': 'VARCHAR', 'col2': 'DOUBLE'}})
              WHERE col0 IS NOT NULL AND col0 != '' AND col2 IS NOT NULL
                AND CAST(epoch_ms(strptime(col0 || ' ' || col1, '%d.%m.%Y %H:%M:%S.%f')) AS BIGINT) > {}",
             safe_path, MIN_VALID_TS
         );
 
-        conn.execute("DROP TABLE IF EXISTS import_temp", []).ok();
-        
         if let Err(e) = conn.execute(&read_query, []) {
             log_to_file(&format!("IMPORT ERROR reading {}: {}", filename, e));
             let _ = conn.execute(
@@ -482,137 +508,114 @@ pub fn import_files(
             continue;
         }
 
-        let (min_ts, max_ts): (i64, i64) = {
-            let result: Result<(Option<i64>, Option<i64>), _> = conn.query_row(
-                "SELECT MIN(timestamp_ms), MAX(timestamp_ms) FROM import_temp",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            );
-            
-            match result {
-                Ok((Some(min), Some(max))) => (min, max),
-                _ => {
-                    conn.execute("DROP TABLE IF EXISTS import_temp", []).ok();
-                    continue;
-                }
-            }
-        };
-
-        let deleted_old: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM sea_readings WHERE timestamp_ms BETWEEN ? AND ?",
-            params![min_ts, max_ts],
-            |row| row.get(0),
-        ).unwrap_or(0);
-
-        conn.execute(
-            "DELETE FROM sea_readings WHERE timestamp_ms BETWEEN ? AND ?",
-            params![min_ts, max_ts],
-        ).ok();
-
-        if deleted_old > 0 {
-            log_to_file(&format!("IMPORT {}: deleted {} old records from DB (same date range)", 
-                filename, deleted_old));
-        }
-
-        let raw_count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM import_temp",
+        // Шаг 2 — определяем полный диапазон дат из СЫРЫХ данных (до фильтрации)
+        let (min_ts, max_ts, raw_count): (Option<i64>, Option<i64>, i64) = conn.query_row(
+            "SELECT MIN(timestamp_ms), MAX(timestamp_ms), COUNT(*) FROM import_temp",
             [],
-            |row: &Row| row.get(0),
-        ).unwrap_or(0);
-        
-        if filter_outliers {
-            let (min_level, max_level, avg_level, q1, q3): (f64, f64, f64, f64, f64) = conn.query_row(
-                "SELECT MIN(level), MAX(level), AVG(level), 
-                        QUANTILE_CONT(level, 0.25), QUANTILE_CONT(level, 0.75) 
-                 FROM import_temp",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
-            ).unwrap_or((0.0, 0.0, 0.0, 0.0, 0.0));
-            
-            log_to_file(&format!("IMPORT {}: levels min={:.2}, max={:.2}, avg={:.2}, Q1={:.2}, Q3={:.2}", 
-                filename, min_level, max_level, avg_level, q1, q3));
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap_or((None, None, 0));
 
-            let iqr = q3 - q1;
-            let lower_bound = q1 - 3.0 * iqr;
-            let upper_bound = q3 + 3.0 * iqr;
-            
-            log_to_file(&format!("IMPORT {}: IQR filter bounds: [{:.2}, {:.2}], IQR={:.2}", 
-                filename, lower_bound, upper_bound, iqr));
+        let mut count: i64 = 0;
 
-            conn.execute(
-                "DELETE FROM import_temp WHERE level < ? OR level > ?",
-                params![lower_bound, upper_bound],
-            ).ok();
+        if raw_count > 0 {
+            // Шаг 3 — применяем фильтр выбросов (на временной таблице, auto-commit)
+            if filter_outliers {
+                let (q1, q3): (f64, f64) = conn.query_row(
+                    "SELECT QUANTILE_CONT(level, 0.25), QUANTILE_CONT(level, 0.75) FROM import_temp",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                ).unwrap_or((0.0, 0.0));
 
-            let after_iqr_count: i64 = conn.query_row(
+                let iqr = q3 - q1;
+                let lower_bound = q1 - 3.0 * iqr;
+                let upper_bound = q3 + 3.0 * iqr;
+                
+                log_to_file(&format!("IMPORT {}: IQR filter bounds: [{:.2}, {:.2}], IQR={:.2}", 
+                    filename, lower_bound, upper_bound, iqr));
+
+                conn.execute(
+                    "DELETE FROM import_temp WHERE level < ? OR level > ?",
+                    params![lower_bound, upper_bound],
+                ).ok();
+
+                let after_iqr = conn.query_row(
+                    "SELECT COUNT(*) FROM import_temp", [], |row| row.get(0)
+                ).unwrap_or(0);
+                total_filtered += raw_count - after_iqr;
+                log_to_file(&format!("IMPORT {}: IQR filter removed {} outliers", 
+                    filename, raw_count - after_iqr));
+            }
+
+            // Получаем финальное количество записей для вставки
+            let final_count: i64 = conn.query_row(
                 "SELECT COUNT(*) FROM import_temp", [], |row| row.get(0)
             ).unwrap_or(0);
-            let removed_by_iqr = raw_count - after_iqr_count;
-            log_to_file(&format!("IMPORT {}: IQR filter removed {} outliers", 
-                filename, removed_by_iqr));
 
-            let insert_query = format!(
-                "INSERT INTO sea_readings (timestamp_ms, level, source_file) 
-                 SELECT timestamp_ms, level, '{}' FROM import_temp",
-                safe_name
-            );
+            if final_count > 0 {
+                if let (Some(min_ts), Some(max_ts)) = (min_ts, max_ts) {
+                    // Шаг 4 — DELETE + INSERT без явной транзакции (избегаем deadlock)
+                    // DuckDB auto-commit, каждая операция атомарна
+                    let deleted = conn.execute(
+                        "DELETE FROM sea_readings WHERE timestamp_ms BETWEEN ? AND ?",
+                        params![min_ts, max_ts],
+                    ).unwrap_or(0);
 
-            if let Err(e) = conn.execute(&insert_query, []) {
-                log_to_file(&format!("IMPORT ERROR inserting {}: {}", filename, e));
-                let _ = conn.execute(
-                    "UPDATE import_log SET status='error', error_msg=? WHERE filename=?",
-                    params![&e.to_string(), &filename],
-                );
-                conn.execute("DROP TABLE IF EXISTS import_temp", []).ok();
-                continue;
+                    if deleted > 0 {
+                        log_to_file(&format!("IMPORT: deleted {} old records in range {}..{}", 
+                            deleted, min_ts, max_ts));
+                    }
+
+                    let insert_query = format!(
+                        "INSERT INTO sea_readings (timestamp_ms, level, source_file)
+                         SELECT timestamp_ms, level, '{}' FROM import_temp",
+                        safe_name
+                    );
+
+                    match conn.execute(&insert_query, []) {
+                        Ok(inserted) => {
+                            count = final_count;
+                            files_processed += 1;
+                            total_records += count;
+                            log_to_file(&format!("IMPORT BATCH OK: deleted {}, inserted {}", deleted, inserted));
+                        }
+                        Err(e) => {
+                            log_to_file(&format!("IMPORT ERROR inserting {}: {}", filename, e));
+                            let _ = conn.execute(
+                                "UPDATE import_log SET status='error', error_msg=? WHERE filename=?",
+                                params![&e.to_string(), &filename],
+                            );
+                            continue;
+                        }
+                    }
+                }
+            } else {
+                log_to_file(&format!("IMPORT {}: no records after filtering", filename));
+                files_processed += 1;
             }
-
-            let final_count: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM sea_readings WHERE source_file = ?",
-                params![&filename],
-                |row| row.get(0),
-            ).unwrap_or(0);
-            
-            total_filtered += raw_count - final_count;
-            log_to_file(&format!("IMPORT {}: {} -> {} (total removed: {})", 
-                filename, raw_count, final_count, raw_count - final_count));
         } else {
-            let insert_query = format!(
-                "INSERT INTO sea_readings (timestamp_ms, level, source_file) SELECT timestamp_ms, level, '{}' FROM import_temp",
-                safe_name
-            );
-
-            if let Err(e) = conn.execute(&insert_query, []) {
-                log_to_file(&format!("IMPORT ERROR inserting {}: {}", filename, e));
-                let _ = conn.execute(
-                    "UPDATE import_log SET status='error', error_msg=? WHERE filename=?",
-                    params![&e.to_string(), &filename],
-                );
-                conn.execute("DROP TABLE IF EXISTS import_temp", []).ok();
-                continue;
-            }
+            log_to_file(&format!("IMPORT {}: no valid records after parsing", filename));
+            files_processed += 1;
         }
-        
-        let _ = conn.execute("DROP TABLE IF EXISTS import_temp", []).ok();
 
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM sea_readings WHERE source_file = ?",
-            params![&filename],
-            |row: &Row| row.get(0),
-        ).unwrap_or(0);
+        // Cleanup временной таблицы
+        conn.execute("DROP TABLE IF EXISTS import_temp", []).ok();
 
-        files_processed += 1;
-        total_records += count;
+        // Проверка: логируем реальное состояние БД
+        let verify: (i64, f64, f64) = conn.query_row(
+            "SELECT COUNT(*), MIN(level), MAX(level) FROM sea_readings",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap_or((0, 0.0, 0.0));
+        log_to_file(&format!("IMPORT VERIFY: total={} min={:.2} max={:.2}", verify.0, verify.1, verify.2));
 
+        // Логирование результата файла
         if filter_outliers {
-            let outliers = raw_count - count;
-            total_filtered += outliers;
-            log_to_file(&format!("IMPORT FILE {}: {} records -> {} (outliers: {})", 
-                filename, raw_count, count, outliers));
+            log_to_file(&format!("IMPORT FILE {}: {} raw -> {} final (outliers: {})",
+                filename, raw_count, count, raw_count - count));
         } else {
             log_to_file(&format!("IMPORT FILE {}: {} records", filename, count));
         }
-        
+
         let _ = conn.execute(
             "INSERT OR REPLACE INTO import_log (filename, status, records_count) VALUES (?, 'ready', ?)",
             params![&filename, count],
@@ -628,7 +631,7 @@ pub fn import_files(
             format!("{} • {:.0} записей/сек", filename, speed)
         };
 
-        let _ = window.emit("import-progress", serde_json::json!({
+        let _ = app.emit("import-progress", serde_json::json!({
             "progress": ((index as f32 + 1.0) / total_files as f32 * 100.0) as u8,
             "current": index + 1,
             "total": total_files,
@@ -637,7 +640,13 @@ pub fn import_files(
         }));
     }
 
-    let _ = window.emit("import-progress", serde_json::json!({
+    // Оптимизация 1 (продолжение): восстанавливаем индекс после массового импорта
+    if use_bulk_opt {
+        log_to_file("IMPORT OPT: recreating index idx_ts");
+        conn.execute("CREATE INDEX idx_ts ON sea_readings(timestamp_ms)", []).ok();
+    }
+
+    let _ = app.emit("import-progress", serde_json::json!({
         "progress": 100,
         "finished": true,
         "status": format!("Импорт завершён! {} записей", total_records)
@@ -659,7 +668,7 @@ pub fn export_month_data(
     year: i32,
     month: u32,
     state: State<AppState>,
-    window: Window,
+    app: AppHandle,
 ) -> Result<String, String> {
     let conn = open_db(&state)?;
     
@@ -714,7 +723,7 @@ pub fn export_month_data(
 
         if (total_rows > 1_000_000) && (i > 0) && (i % 1_000_000 == 0) {
             let progress = ((i as f32 / total_rows as f32) * 100.0) as u8;
-            let _ = window.emit("export-progress", serde_json::json!({
+            let _ = app.emit("export-progress", serde_json::json!({
                 "progress": progress
             }));
         }

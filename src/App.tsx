@@ -170,6 +170,9 @@ function App() {
         return;
       }
 
+      // Задержка после закрытия диалога — fix для Windows (event loop recovery)
+      await new Promise(r => setTimeout(r, 100));
+
       setIsImporting(true);
       setIsUiLocked(true);
       setIsLoadingOverlay(true);

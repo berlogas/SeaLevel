@@ -32,10 +32,12 @@ export async function importFiles(
   
   try {
     return await invoke('import_files', { 
-      files, 
-      filterOutliers,
-      halfWindow,
-      k,
+      payload: {
+        files, 
+        filterOutliers,
+        halfWindow,
+        k,
+      }
     })
   } catch (e) {
     console.error('importFiles error:', e)
