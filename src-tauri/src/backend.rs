@@ -482,22 +482,28 @@ pub fn import_files(
             "status": "Чтение файла..."
         }));
 
-        let safe_path = file_path.replace("'", "''");
+        let safe_path = file_path.replace("'", "''").replace('\\', "/");
         let safe_name = filename.replace("'", "''");
+
+        log_to_file(&format!("IMPORT: processing file '{}' -> path={}", filename, safe_path));
 
         conn.execute("DROP TABLE IF EXISTS import_temp", []).ok();
 
-        // Шаг 1 — загружаем CSV во временную таблицу (auto-commit, вне транзакции)
+        // Шаг 1 — загружаем CSV во временную таблицу
+        // ignore_errors=true + TRY_CAST — пропускаем мусорные строки
         let read_query = format!(
             "CREATE TABLE import_temp AS
              SELECT CAST(epoch_ms(strptime(col0 || ' ' || col1, '%d.%m.%Y %H:%M:%S.%f')) AS BIGINT) as timestamp_ms,
-                    col2::DOUBLE as level
-             FROM read_csv('{}', header=false, sep=' ', auto_detect=false,
-                 columns={{'col0': 'VARCHAR', 'col1': 'VARCHAR', 'col2': 'DOUBLE'}})
+                    TRY_CAST(col2 AS DOUBLE) as level
+             FROM read_csv('{}', header=false, sep=' ', auto_detect=false, ignore_errors=true,
+                 columns={{'col0': 'VARCHAR', 'col1': 'VARCHAR', 'col2': 'VARCHAR'}})
              WHERE col0 IS NOT NULL AND col0 != '' AND col2 IS NOT NULL
+               AND TRY_CAST(col2 AS DOUBLE) IS NOT NULL
                AND CAST(epoch_ms(strptime(col0 || ' ' || col1, '%d.%m.%Y %H:%M:%S.%f')) AS BIGINT) > {}",
             safe_path, MIN_VALID_TS
         );
+
+        log_to_file(&format!("IMPORT: executing read_csv for {}", filename));
 
         if let Err(e) = conn.execute(&read_query, []) {
             log_to_file(&format!("IMPORT ERROR reading {}: {}", filename, e));
@@ -507,6 +513,8 @@ pub fn import_files(
             );
             continue;
         }
+
+        log_to_file(&format!("IMPORT: read_csv OK for {}", filename));
 
         // Шаг 2 — определяем полный диапазон дат из СЫРЫХ данных (до фильтрации)
         let (min_ts, max_ts, raw_count): (Option<i64>, Option<i64>, i64) = conn.query_row(

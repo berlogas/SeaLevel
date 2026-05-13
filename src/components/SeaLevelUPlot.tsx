@@ -154,20 +154,22 @@ export default function SeaLevelUPlot({
           value: (_u, v) =>
             v ? new Date(v * 1000).toLocaleString("ru-RU") : "",
         },
-        { label: "Среднее", stroke: "#006994", width: 2.8, spanGaps: false },
+        { label: "Среднее", stroke: "#006994", width: 2.0, spanGaps: false },
         {
           label: "+1σ",
           stroke: "#ff7f0e",
-          width: 1.5,
+          width: 1.0,
           dash: [5, 3],
           spanGaps: false,
+          show: false,
         },
         {
           label: "-1σ",
           stroke: "#ff7f0e",
-          width: 1.5,
+          width: 1.0,
           dash: [5, 3],
           spanGaps: false,
+          show: false,
         },
       ],
 
