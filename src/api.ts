@@ -160,3 +160,18 @@ export async function getAvailableYears(): Promise<number[]> {
   }
 }
 
+export async function clearAggregateCache(): Promise<void> {
+  if (isDev) {
+    const response = await httpFetch('/clear_cache', { method: 'POST' })
+    if (!response.ok) throw new Error('Failed to clear cache')
+    return
+  }
+
+  try {
+    await invoke('clear_aggregate_cache')
+  } catch (e) {
+    console.error('clearAggregateCache error:', e)
+    throw e
+  }
+}
+

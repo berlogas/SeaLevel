@@ -28,6 +28,8 @@ tauri-plugin-http = "2"
 duckdb = { version = "1", features = ["bundled"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1.0"
+lru = "0.12"
+lazy_static = "1.4"
 
 [profile.release]
 strip = true

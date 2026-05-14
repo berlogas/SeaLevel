@@ -1,6 +1,7 @@
 import { useEffect, useRef, useMemo, useCallback } from "react";
 import Uplot from "uplot";
 import "uplot/dist/uPlot.min.css";
+import React from "react";
 
 type DataPoint = {
   timestamp: number;
@@ -32,7 +33,8 @@ interface Props {
   onZoomChange?: (startMs: number, endMs: number) => void;
 }
 
-export default function SeaLevelUPlot({
+// ОПТИМИЗАЦИЯ: Обернуть в React.memo для избежания ненужных re-renders
+export default React.memo(function SeaLevelUPlot({
   data,
   frequency,
   height = 480,
@@ -42,12 +44,26 @@ export default function SeaLevelUPlot({
   const uplotRef = useRef<Uplot | null>(null);
 
   const chartData = useMemo(() => {
+    // ОПТИМИЗАЦИЯ: LOD (Level of Detail) - снизить точки если много
+    const MAX_CHART_POINTS = 5000;
+    let processedData = data;
+    
+    // Если точек больше максимума - downsample
+    if (data.length > MAX_CHART_POINTS) {
+      const step = Math.ceil(data.length / MAX_CHART_POINTS);
+      processedData = [];
+      for (let i = 0; i < data.length; i += step) {
+        processedData.push(data[i]);
+      }
+      console.log(`[SeaLevelUPlot] LOD: ${data.length} points → ${processedData.length} (step=${step})`);
+    }
+    
     const t: (number | null)[] = [];
     const m: (number | null)[] = [];
     const p: (number | null)[] = [];
     const n: (number | null)[] = [];
 
-    data.forEach((d) => {
+    processedData.forEach((d) => {
       t.push(d.timestamp ? d.timestamp / 1000 : null);
       m.push(d.mean);
       if (d.std != null && d.mean != null) {
@@ -144,7 +160,7 @@ export default function SeaLevelUPlot({
     const opts: Uplot.Options = {
       width: chartRef.current.offsetWidth,
       height: height,
-      padding: [20, 24, 50, 70],
+      padding: [10, 24, 10, 70],
 
       scales: { x: { time: true }, y: { auto: true } },
 
@@ -274,4 +290,14 @@ export default function SeaLevelUPlot({
       <div ref={chartRef} style={{ width: "100%", minHeight: height }} />
     </div>
   );
-}
+}, (prevProps, nextProps) => {
+  // Custom comparison для memo:
+  // Возвращаем true если пропсы одинаковые (избежать re-render)
+  return (
+    prevProps.frequency === nextProps.frequency &&
+    prevProps.height === nextProps.height &&
+    prevProps.data.length === nextProps.data.length &&
+    prevProps.data === nextProps.data &&
+    prevProps.onZoomChange === nextProps.onZoomChange
+  );
+});

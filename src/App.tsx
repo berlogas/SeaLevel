@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useStore } from "./store";
 import {
@@ -9,19 +9,12 @@ import {
   getAvailableYears,
   getImportLog,
   getDateRange,
+  clearAggregateCache,
 } from "./api";
-import SeaLevelUPlot from "./components/SeaLevelUPlot";
-
-const FREQUENCIES = [
-  { value: "10min", label: "10 минут" },
-  { value: "hour", label: "Час" },
-  { value: "day", label: "День" },
-  { value: "week", label: "Неделя" },
-  { value: "decade", label: "Декада" },
-  { value: "month", label: "Месяц" },
-  { value: "quarter", label: "Квартал" },
-  { value: "year", label: "Год" },
-];
+import ChartSection from "./components/ChartSection";
+import ControlsSection from "./components/ControlsSection";
+import FilesModal from "./components/FilesModal";
+import ActionButtonsSection from "./components/ActionButtonsSection";
 
 function App() {
   const {
@@ -112,7 +105,8 @@ function App() {
   };
 
   // Обновляет диапазон дат после импорта (выравнивание на начало/конец периода)
-  const updateDateRangeAfterImport = async () => {
+  // Возвращает новые startDate и endDate для последующего расчёта
+  const updateDateRangeAfterImport = async (): Promise<{ startDate: string; endDate: string } | null> => {
     try {
       setIsLoadingOverlay(true);
       
@@ -133,18 +127,25 @@ function App() {
           start = new Date(`${y}-${m}-${d}`);
         }
 
-        setStartDate(start.toISOString().split("T")[0]);
-        setEndDate(end.toISOString().split("T")[0]);
+        const newStartDate = start.toISOString().split("T")[0];
+        const newEndDate = end.toISOString().split("T")[0];
+        
+        setStartDate(newStartDate);
+        setEndDate(newEndDate);
         setSelectedPeriod(0);
+        
+        return { startDate: newStartDate, endDate: newEndDate };
       }
+      return null;
     } catch (e) {
       console.error("Failed to update date range:", e);
+      return null;
     } finally {
       setIsLoadingOverlay(false);
     }
   };
 
-  const handleImport = async () => {
+  const handleImport = useCallback(async () => {
     try {
       let selected: any = null;
       let dialogLib: any = null;
@@ -187,7 +188,18 @@ function App() {
           useIqrFilter
         );
 
-        await updateDateRangeAfterImport();
+        const range = await updateDateRangeAfterImport();
+        
+        // Очистка кэша агрегации после импорта (dev-режим)
+        await clearAggregateCache();
+        
+        setAggregateData([]);
+        setCalcTime(0);
+        
+        // Автоматический пересчёт после импорта
+        if (range) {
+          await performCalculate(range.startDate, range.endDate, frequency);
+        }
       } finally {
         setIsImporting(false);
         setIsUiLocked(false);
@@ -200,20 +212,15 @@ function App() {
       setIsUiLocked(false);
       setIsLoadingOverlay(false);
     }
-  };
+  }, [useIqrFilter, setError, setAggregateData, setCalcTime, frequency, clearAggregateCache]);
 
-  const handleCalculate = async () => {
-    if (!startDate || !endDate) {
-      setError("Выберите диапазон дат");
-      return;
-    }
-
+  const performCalculate = async (sDate: string, eDate: string, freq: string) => {
     try {
       setIsLoading(true);
       setError(null);
       const startTime = Date.now();
 
-      const result = await aggregate(startDate, endDate, frequency);
+      const result = await aggregate(sDate, eDate, freq);
       setAggregateData(result.data);
       setCalcTime(Date.now() - startTime);
     } catch (e: any) {
@@ -222,6 +229,14 @@ function App() {
       setIsLoading(false);
     }
   };
+
+  const handleCalculate = useCallback(async () => {
+    if (!startDate || !endDate) {
+      setError("Выберите диапазон дат");
+      return;
+    }
+    await performCalculate(startDate, endDate, frequency);
+  }, [startDate, endDate, frequency, setError]);
 
   // const handleExportCSV = () => {
   //   if (aggregateData.length === 0) return;
@@ -246,7 +261,7 @@ function App() {
   //   URL.revokeObjectURL(url);
   // };
 
-  const handleExportFullCSV = async () => {
+  const handleExportFullCSV = useCallback(async () => {
     try {
       setIsLoadingOverlay(true);
       setExportMessage(null);
@@ -285,7 +300,7 @@ function App() {
     } finally {
       setIsLoadingOverlay(false);
     }
-  };
+  }, [startDate, endDate, frequency, setError]);
 
   const handleMonthExport = async () => {
     if (!selectedYear) {
@@ -325,7 +340,7 @@ function App() {
   };
 
   // Быстрый зум
-  const setQuickPeriod = (days: number) => {
+  const setQuickPeriod = useCallback((days: number) => {
     if (!dateRange.end) return;
 
     const [d, m, y] = dateRange.end.split(".");
@@ -346,7 +361,7 @@ function App() {
     setStartDate(start.toISOString().split("T")[0]);
     setEndDate(end.toISOString().split("T")[0]);
     setSelectedPeriod(days);
-  };
+  }, [dateRange]);
 
   return (
     <div className="app">
@@ -356,193 +371,35 @@ function App() {
       </header>
 
       <div className="controls">
-        <div className="control-group">
-          <div className="files-list">
-            <button
-              className="btn-link"
-              onClick={() => setShowFilesModal(true)}
-              disabled={isUiLocked}
-            >
-              Файлы ({importFiles.length})
-            </button>
-          </div>
-          
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <button
-              className="btn btn-primary"
-              onClick={handleImport}
-              disabled={isImporting}
-            >
-              {isImporting ? "Загрузка..." : "Загрузить"}
-            </button>
+        <ActionButtonsSection
+          onFilesClick={() => setShowFilesModal(true)}
+          onImportClick={handleImport}
+          onFilterToggle={setUseIqrFilter}
+          onExportFullClick={handleExportFullCSV}
+          onExportMonthClick={openMonthExportModal}
+          filesCount={importFiles.length}
+          isImporting={isImporting}
+          isUiLocked={isUiLocked}
+          useIqrFilter={useIqrFilter}
+          hasAggregateData={aggregateData.length > 0}
+        />
 
-            {/* Кнопка IQR фильтра — воронка */}
-            <button 
-              className={`btn btn-funnel ${useIqrFilter ? "active" : ""}`}
-              onClick={() => setUseIqrFilter(!useIqrFilter)}
-              disabled={isUiLocked}
-              title={useIqrFilter ? "Фильтр IQR включён" : "Фильтр IQR выключён"}
-              aria-label="Переключить фильтр IQR"
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
-              </svg>
-            </button>
-          </div>
-        </div>
+        <ControlsSection
+          startDate={startDate}
+          endDate={endDate}
+          frequency={frequency}
+          dateRange={dateRange}
+          selectedPeriod={selectedPeriod}
+          isLoading={isLoading}
+          isUiLocked={isUiLocked}
+          onStartDateChange={setStartDate}
+          onEndDateChange={setEndDate}
+          onFrequencyChange={setFrequency}
+          onLoadData={handleCalculate}
+          onQuickPeriod={setQuickPeriod}
+        />
 
-        <div className="control-group">
-          <label>Диапазон дат:</label>
-          <div className="date-range">
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              disabled={isUiLocked}
-            />
-            <span>–</span>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              disabled={isUiLocked}
-            />
-          </div>
-        </div>
 
-        <div className="control-group">
-          <label>Быстрый период:</label>
-          <div style={{ display: "flex", gap: "6px" }}>
-            <button 
-              className="btn-period" 
-              onClick={() => setQuickPeriod(30)}
-              disabled={isUiLocked}
-              style={{ backgroundColor: selectedPeriod === 30 ? '#e7f5ff' : undefined }}
-            >
-              30 дней
-            </button>
-            <button 
-              className="btn-period" 
-              onClick={() => setQuickPeriod(90)}
-              disabled={isUiLocked}
-              style={{ backgroundColor: selectedPeriod === 90 ? '#e7f5ff' : undefined }}
-            >
-              3 месяца
-            </button>
-            <button 
-              className="btn-period" 
-              onClick={() => setQuickPeriod(365)}
-              disabled={isUiLocked}
-              style={{ backgroundColor: selectedPeriod === 365 ? '#e7f5ff' : undefined }}
-            >
-              1 год
-            </button>
-            <button 
-              className="btn-period" 
-              onClick={() => setQuickPeriod(0)}
-              disabled={isUiLocked}
-              style={{ backgroundColor: selectedPeriod === 0 ? '#e7f5ff' : undefined }}
-            >
-              Весь период
-            </button>
-          </div>
-        </div>
-
-        <div className="control-group">
-          <label>Дискретность:</label>
-          <select
-            value={frequency}
-            onChange={(e) => setFrequency(e.target.value)}
-            disabled={isUiLocked}
-          >
-            {FREQUENCIES.map((f) => (
-              <option key={f.value} value={f.value}>
-                {f.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div
-          className="control-group"
-        >
-          <button
-            className="btn btn-success  btn-offset"
-            onClick={handleCalculate}
-            disabled={isLoading || isUiLocked}
-          >
-            {isLoading ? "Расчёт..." : "Рассчитать"}
-          </button>
-        </div>
-
-        <div className="control-group">
-          <button
-            className="btn btn-secondary  btn-offset"
-            style={{
-              height: "36px",
-              minHeight: "36px",
-              padding: "4px 12px",
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              lineHeight: "1",
-            }}
-            onClick={handleExportFullCSV}
-            disabled={aggregateData.length === 0 || isUiLocked}
-            aria-label="Экспорт CSV"
-            title="Экспорт CSV (сжатый)"
-          >
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="7 10 12 15 17 10" />
-              <line x1="12" y1="15" x2="12" y2="3" />
-            </svg>
-          </button>
-          </div>
-
-        <div className="control-group">
-          <button
-            className="btn btn-info  btn-offset"
-            style={{
-              height: "36px",
-              minHeight: "36px",
-              padding: "4px 12px",
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              lineHeight: "1",
-            }}
-            onClick={openMonthExportModal}
-            disabled={isUiLocked}
-            aria-label="Экспорт месяца"
-            title="Экспорт месяца в формате YYYY_MM.dat"
-          >
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-              <line x1="16" y1="2" x2="16" y2="6" />
-              <line x1="8" y1="2" x2="8" y2="6" />
-              <line x1="3" y1="10" x2="21" y2="10" />
-            </svg>
-          </button>
-        </div>
       </div>
 
       {error && (
@@ -570,10 +427,10 @@ function App() {
 
       <div className="chart-container">
         <div className="chart">
-          <SeaLevelUPlot
-            data={aggregateData}
+          <ChartSection
+            aggregateData={aggregateData}
             frequency={frequency}
-            height={480}
+            isLoading={isLoading}
           />
         </div>
       </div>
@@ -594,38 +451,11 @@ function App() {
       </footer>
 
       {showFilesModal && (
-        <div className="modal-overlay" onClick={() => setShowFilesModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Загруженные файлы</h3>
-              <button onClick={() => setShowFilesModal(false)}>×</button>
-            </div>
-            <div className="modal-body">
-              {importFiles.length === 0 ? (
-                <p>Нет загруженных файлов</p>
-              ) : (
-                <table className="files-table">
-                  <thead>
-                    <tr>
-                      <th>Файл</th>
-                      <th>Статус</th>
-                      <th>Записей</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {importFiles.map((f) => (
-                      <tr key={f.filename}>
-                        <td>{f.filename}</td>
-                        <td className={f.status}>{f.status}</td>
-                        <td>{f.records_count}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
-        </div>
+        <FilesModal
+          isOpen={showFilesModal}
+          files={importFiles}
+          onClose={() => setShowFilesModal(false)}
+        />
       )}
 
       {showMonthExportModal && (

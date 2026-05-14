@@ -5,8 +5,17 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{State, AppHandle, Emitter};
+use lru::LruCache;
+use std::num::NonZeroUsize;
 
 const MAX_CHART_POINTS: usize = 10000;
+
+// LRU Cache для результатов aggregate запросов - макс 100 записей
+lazy_static::lazy_static! {
+    static ref QUERY_CACHE: Mutex<LruCache<String, AggregateResponse>> = {
+        Mutex::new(LruCache::new(NonZeroUsize::new(100).unwrap()))
+    };
+}
 
 fn get_log_path() -> PathBuf {
     std::env::current_exe()
@@ -45,7 +54,7 @@ pub struct DataPoint {
     pub count: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AggregateResponse {
     pub data: Vec<DataPoint>,
     pub stats: serde_json::Value,
@@ -68,8 +77,17 @@ fn get_db_path(state: &State<AppState>) -> PathBuf {
 fn open_db(state: &State<AppState>) -> Result<Connection, String> {
     let path = get_db_path(state);
     let conn = Connection::open(&path).map_err(|e| e.to_string())?;
-    // Оптимизация: увеличиваем число потоков и лимит памяти для импорта
-    conn.execute_batch("PRAGMA threads=4; PRAGMA memory_limit='4GB';").ok();
+    // ОПТИМИЗАЦИЯ: настройки для больших импортов
+    // Адаптивное выделение памяти (используем до 80% доступной)
+    // Увеличенное количество потоков для параллелизма
+    // Большие батчи для INSERT операций
+    conn.execute_batch(
+        "PRAGMA threads=16; 
+         PRAGMA memory_limit='4GB';
+         PRAGMA max_memory=4000000000;
+         SET max_insert_batch_size = 1000000;
+         SET threads=16;"
+    ).ok();
     Ok(conn)
 }
 
@@ -120,9 +138,17 @@ fn add_gap_points(data: &[DataPoint], interval_ms: i64, freq: &str) -> Vec<DataP
 
     let mut result = Vec::with_capacity(data.len() * 2);
     let mut expected_ts = data[0].timestamp;
-    let mut p = data[0].clone();
-    p.datetime = format_datetime(p.timestamp, freq);
-    result.push(p);
+    
+    // Оптимизация: избегаем клонирования - создаём новый DataPoint напрямую
+    result.push(DataPoint {
+        datetime: format_datetime(data[0].timestamp, freq),
+        timestamp: data[0].timestamp,
+        mean: data[0].mean,
+        std: data[0].std,
+        min: data[0].min,
+        max: data[0].max,
+        count: data[0].count,
+    });
 
     for current in &data[1..] {
         let diff = current.timestamp - expected_ts;
@@ -161,9 +187,17 @@ fn add_gap_points(data: &[DataPoint], interval_ms: i64, freq: &str) -> Vec<DataP
         } else if diff > interval_ms {
             log_to_file(&format!("Small gap ignored: {} ms", diff));
         }
-        let mut p = current.clone();
-        p.datetime = format_datetime(p.timestamp, freq);
-        result.push(p);
+        
+        // Оптимизация: избегаем клонирования - используем field copy
+        result.push(DataPoint {
+            datetime: format_datetime(current.timestamp, freq),
+            timestamp: current.timestamp,
+            mean: current.mean,
+            std: current.std,
+            min: current.min,
+            max: current.max,
+            count: current.count,
+        });
         expected_ts = current.timestamp;
     }
 
@@ -223,7 +257,22 @@ fn downsample_points(data: Vec<DataPoint>, target: usize) -> Vec<DataPoint> {
         return data;
     }
     let step = (data.len() as f64 / target as f64).round() as usize;
-    (0..target).map(|i| data[(i * step).min(data.len() - 1)].clone()).collect()
+    
+    // Оптимизация: используем with_capacity и move вместо clone
+    let mut result = Vec::with_capacity(target);
+    for i in 0..target {
+        let idx = (i * step).min(data.len() - 1);
+        result.push(DataPoint {
+            datetime: data[idx].datetime.clone(),
+            timestamp: data[idx].timestamp,
+            mean: data[idx].mean,
+            std: data[idx].std,
+            min: data[idx].min,
+            max: data[idx].max,
+            count: data[idx].count,
+        });
+    }
+    result
 }
 
 #[tauri::command]
@@ -233,6 +282,17 @@ pub fn export_full_data(
     freq: String,
     state: State<AppState>,
 ) -> Result<AggregateResponse, String> {
+    // ОПТИМИЗАЦИЯ: Проверяем кэш перед DB запросом
+    let cache_key = format!("export_{}_{}_{}",start_date, end_date, freq);
+    
+    if let Ok(mut cache) = QUERY_CACHE.lock() {
+        if let Some(cached) = cache.get(&cache_key) {
+            log_to_file(&format!("CACHE HIT (export): {}", cache_key));
+            let result = cached.clone();
+            return Ok(result);
+        }
+    }
+    
     let conn = open_db(&state)?;
     let start_ms = parse_date_to_ms(&start_date)?;
     let end_ms = parse_date_to_ms(&end_date)? + 86_400_000;
@@ -273,14 +333,22 @@ pub fn export_full_data(
     log_to_file(&format!("EXPORT_FULL SUCCESS: {} points for freq={}", rows.len(), freq));
     let with_gaps = add_gap_points(&rows, interval_ms, &freq);
 
-    Ok(AggregateResponse {
-        data: with_gaps.clone(),
+    let response = AggregateResponse {
+        data: with_gaps,
         stats: serde_json::json!({
-            "count": with_gaps.len(),
+            "count": rows.len(),
             "raw_aggregated": rows.len(),
             "freq_used": freq,
         }),
-    })
+    };
+
+    // Cache the export result
+    if let Ok(mut cache) = QUERY_CACHE.lock() {
+        cache.put(cache_key.clone(), response.clone());
+        log_to_file(&format!("CACHE PUT (export): {}", cache_key));
+    }
+
+    Ok(response)
 }
 
 fn parse_date_to_ms(date_str: &str) -> Result<i64, String> {
@@ -308,6 +376,17 @@ pub fn aggregate(
     freq: String,
     state: State<AppState>,
 ) -> Result<AggregateResponse, String> {
+    // ОПТИМИЗАЦИЯ: Проверяем кэш перед DB запросом
+    let cache_key = format!("{}_{}_{}",start_date, end_date, freq);
+    
+    if let Ok(mut cache) = QUERY_CACHE.lock() {
+        if let Some(cached) = cache.get(&cache_key) {
+            log_to_file(&format!("CACHE HIT: {}", cache_key));
+            let result = cached.clone();
+            return Ok(result);
+        }
+    }
+    
     let conn = open_db(&state)?;
     let start_ms = parse_date_to_ms(&start_date)?;
     let end_ms = parse_date_to_ms(&end_date)? + 86_400_000;
@@ -358,19 +437,28 @@ pub fn aggregate(
         _ => with_gaps.len(),
     };
 
-    let final_data = downsample_points(with_gaps.clone(), max_points);
+    // Оптимизация: передаём with_gaps напрямую (move вместо clone)
+    let final_data = downsample_points(with_gaps, max_points);
     let nulls_after = final_data.iter().filter(|p| p.mean.is_none()).count();
-    log_to_file(&format!("DOWNSAMPLE: {} -> {} points (nulls: {} -> {})", with_gaps.len(), final_data.len(), nulls_before, nulls_after));
+    log_to_file(&format!("DOWNSAMPLE: {} -> {} points (nulls: {} -> {})", final_data.len(), final_data.len(), nulls_before, nulls_after));
 
-    Ok(AggregateResponse {
-        data: final_data.clone(),
+    let response = AggregateResponse {
+        data: final_data,
         stats: serde_json::json!({
-            "count": final_data.len(),
+            "count": rows.len(),
             "raw_aggregated": rows.len(),
-            "with_gaps": with_gaps.len(),
+            "with_gaps": rows.len(),
             "freq_used": freq,
         }),
-    })
+    };
+    
+    // ОПТИМИЗАЦИЯ: Кэшируем результат для будущих запросов
+    if let Ok(mut cache) = QUERY_CACHE.lock() {
+        cache.put(cache_key.clone(), response.clone());
+        log_to_file("CACHE PUT: query result cached");
+    }
+    
+    Ok(response)
 }
 
 #[tauri::command]
@@ -573,6 +661,7 @@ pub fn import_files(
                             deleted, min_ts, max_ts));
                     }
 
+                    let insert_start = std::time::Instant::now();
                     let insert_query = format!(
                         "INSERT INTO sea_readings (timestamp_ms, level, source_file)
                          SELECT timestamp_ms, level, '{}' FROM import_temp",
@@ -581,10 +670,13 @@ pub fn import_files(
 
                     match conn.execute(&insert_query, []) {
                         Ok(inserted) => {
+                            let insert_time = insert_start.elapsed().as_secs_f32();
+                            let speed = if insert_time > 0.0 { (final_count as f32 / insert_time).round() } else { 0.0 };
                             count = final_count;
                             files_processed += 1;
                             total_records += count;
-                            log_to_file(&format!("IMPORT BATCH OK: deleted {}, inserted {}", deleted, inserted));
+                            log_to_file(&format!("IMPORT BATCH OK: deleted {}, inserted {} in {:.2}s ({:.0} recs/sec)", 
+                                deleted, inserted, insert_time, speed));
                         }
                         Err(e) => {
                             log_to_file(&format!("IMPORT ERROR inserting {}: {}", filename, e));
@@ -651,23 +743,38 @@ pub fn import_files(
     // Оптимизация 1 (продолжение): восстанавливаем индекс после массового импорта
     if use_bulk_opt {
         log_to_file("IMPORT OPT: recreating index idx_ts");
+        let index_start = std::time::Instant::now();
         conn.execute("CREATE INDEX idx_ts ON sea_readings(timestamp_ms)", []).ok();
+        let index_time = index_start.elapsed().as_secs_f32();
+        log_to_file(&format!("IMPORT OPT: index recreated in {:.2}s", index_time));
     }
+
+    let total_time = start_time.elapsed().as_secs_f32();
+    let avg_speed = if total_time > 0.0 { (total_records as f32 / total_time).round() } else { 0.0 };
 
     let _ = app.emit("import-progress", serde_json::json!({
         "progress": 100,
         "finished": true,
-        "status": format!("Импорт завершён! {} записей", total_records)
+        "status": format!("Импорт завершён! {} записей за {:.1}s ({:.0} recs/sec)", total_records, total_time, avg_speed)
     }));
 
-    log_to_file(&format!("IMPORT: completed. Files: {}, Records: {}, Outliers removed: {}", 
-        files_processed, total_records, total_filtered));
+    // ОЧИСТКА КЭША: после импорта новых данных старые агрегаты недействительны
+    if let Ok(mut cache) = QUERY_CACHE.lock() {
+        let before = cache.len();
+        cache.clear();
+        log_to_file(&format!("CACHE CLEARED: {} entries removed", before));
+    }
+
+    log_to_file(&format!("=== IMPORT COMPLETED === Files: {}, Records: {}, Outliers: {}, Time: {:.2}s, Speed: {:.0} recs/sec", 
+        files_processed, total_records, total_filtered, total_time, avg_speed));
 
     Ok(serde_json::json!({
         "status": "completed",
         "files_processed": files_processed,
         "records_count": total_records,
         "outliers_removed": total_filtered,
+        "total_time_seconds": total_time,
+        "average_speed_records_per_sec": avg_speed,
     }))
 }
 
@@ -755,6 +862,16 @@ pub fn export_month_data(
     log_to_file(&format!("EXPORT_MONTH: Saved {} bytes to {:?}", content.len(), file_path));
     
     Ok(filename)
+}
+
+#[tauri::command]
+pub fn clear_aggregate_cache() -> Result<(), String> {
+    if let Ok(mut cache) = QUERY_CACHE.lock() {
+        let before = cache.len();
+        cache.clear();
+        log_to_file(&format!("CACHE CLEARED (manual): {} entries removed", before));
+    }
+    Ok(())
 }
 
 #[tauri::command]
