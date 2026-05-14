@@ -20,39 +20,38 @@ export default defineConfig({
     strictPort: true,
   },
   
-  // ОПТИМИЗАЦИЯ: Production build settings
-  build: {
-    // Минимизация целевого окружения для лучшей оптимизации
-    target: 'ES2020',
-    
-    // Включить минификацию
-    minify: 'terser',
-    terserOptions: {
-      compress: {
-        drop_console: true, // Удалить console.log в prod
-        passes: 2,          // Несколько проходов минификации
-      },
-      mangle: true,
-      format: {
-        comments: false,
-      },
-    },
-    
-    // Оптимизация rollup
-    rollupOptions: {
-      output: {
-        // Code splitting: отделить vendor библиотеки
-        manualChunks: {
-          'vendor-react': ['react', 'react-dom'],
-          'vendor-tauri': ['@tauri-apps/api'],
-          'vendor-uplot': ['uplot'],
-          'vendor-charts': ['recharts'],
+    // ОПТИМИЗАЦИЯ: Production build settings
+    build: {
+      // Минимизация целевого окружения для лучшей оптимизации
+      target: 'ES2020',
+      
+      // Включить минификацию
+      minify: 'terser',
+      terserOptions: {
+        compress: {
+          drop_console: true, // Удалить console.log в prod
+          passes: 2,          // Несколько проходов минификации
         },
-        // Оптимизировать размер чанков
-        chunkFileNames: 'chunks/[name]-[hash].js',
-        entryFileNames: '[name]-[hash].js',
+        mangle: true,
+        format: {
+          comments: false,
+        },
       },
-    },
+      
+      // Оптимизация rollup
+      rollupOptions: {
+        output: {
+          // Code splitting: отделить vendor библиотеки
+          manualChunks: {
+            'vendor-react': ['react', 'react-dom'],
+            'vendor-tauri': ['@tauri-apps/api'],
+            'vendor-uplot': ['uplot'],
+          },
+          // Оптимизировать размер чанков
+          chunkFileNames: 'chunks/[name]-[hash].js',
+          entryFileNames: '[name]-[hash].js',
+        },
+      },
     
     // Chunk size warning limit - нужен для больших приложений
     chunkSizeWarningLimit: 1000,
@@ -70,7 +69,7 @@ export default defineConfig({
     reportCompressedSize: true,
   },
   
-  // ОПТИМИЗАЦИЯ: Зависимости
+    // ОПТИМИЗАЦИЯ: Зависимости
   optimizeDeps: {
     // Явно указать зависимости для предварительной обработки
     include: [
@@ -78,7 +77,6 @@ export default defineConfig({
       'react-dom',
       'uplot',
       'zustand',
-      'recharts',
       '@tauri-apps/api',
     ],
     // Использовать эмодули где возможно

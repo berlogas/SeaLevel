@@ -66,7 +66,6 @@
 | Vite | 6.0.1 | Сборщик |
 | Zustand | 5.0.12 | State management |
 | uPlot | 1.6.32 | Визуализация графиков |
-| Recharts | 3.8.1 | Дополнительные графики |
 | Tauri API | 2.x | Нативные вызовы |
 
 ### Backend (Dev)
@@ -122,8 +121,7 @@ SeaLevel/
 ├── backend/                      # Python backend (dev режим)
 │   ├── main.py                   # FastAPI приложение
 │   ├── run_server.py             # Скрипт запуска
-│   ├── requirements.txt          # Python зависимости
-│   └── test_*.py                 # Тесты
+│   └── requirements.txt          # Python зависимости
 │
 ├── docs/                         # Документация
 │   ├── DEVELOPER_GUIDE.md        # Это руководство
